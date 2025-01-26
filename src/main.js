@@ -179,10 +179,25 @@ ipcMain.handle('getFile', async (event, url) => {
     if (!response.ok) {
       throw new Error('Network response was not ok')
     }
-    const data = await response.json()
-    return data
+
+    // Check if response is JSON
+    const contentType = response.headers.get('content-type')
+    if (contentType && contentType.includes('application/json')) {
+      return await response.json()
+    }
+
+    // Try to parse as JSON even if content-type is not JSON
+    try {
+      const text = await response.text()
+      console.log(text)
+      return JSON.parse(text)
+    } catch (parseError) {
+      console.warn('Failed to parse response as JSON:', parseError)
+      return null
+    }
+
   } catch (error) {
-    console.error('Error checking self version:', error)
+    console.warn('Error fetching file:', error)
     return null
   }
 })
