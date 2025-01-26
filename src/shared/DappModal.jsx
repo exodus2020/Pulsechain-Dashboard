@@ -130,14 +130,12 @@ function DappModal({communityData}) {
     setFilter(value)
   }
 
-  const [ communityMarket, setCommunityMarket ] = useState(defaultMarket)
+  const [ communityMarket, setCommunityMarket ] = useState([])
   const communityDapps = _dapps ?? []
-  //communityMarket?.dapps ?? []
 
   useEffect(() => {
     // Check versions for all repositories on component mount
     checkAllVersions()
-    // checkIsListValid('https://gitlab.com/pulsechain-lunagray/pulsechain-dashboard/-/raw/dev/src/config/market.json?ref_type=heads')
   }, [communityMarket])
 
   const checkAllVersions = async () => {
@@ -151,7 +149,6 @@ function DappModal({communityData}) {
       }
     }
 
-    const communityDapps = (communityMarket ?? {})?.dapps ?? []
     for (const repo of communityDapps) {
       try {
         const version = await window.electron.checkVersion(repo.folder)

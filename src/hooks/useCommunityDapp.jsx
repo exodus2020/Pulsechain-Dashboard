@@ -66,7 +66,6 @@ export default function useCommunityDapp(context) {
             setCommunityDapps([...communityDapps_, ...communityLinks])
         }
         
-        // setCommunityLists(context?.data?.communityDapps || [])
     }, [context?.update])
 
     const checkIsListValid = async (url) => {
