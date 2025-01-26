@@ -40,14 +40,14 @@ export default function useCommunityDapp(context) {
                 return market.data.dapps.map(dapp => ({ communityName: market?.data?.name ?? '', communityUrl: market?.url ?? '', ...dapp}))
             }).flat()
 
-            const communityDapps = dappArray.filter(f => isValidLocalDapp(f))
+            const communityDapps_ = dappArray.filter(f => isValidLocalDapp(f))
             .filter(f => !repositories.some(s => s.folder.toLowerCase() === f.folder.toLowerCase()))
 
-            const usedPorts = new Set([...communityDapps.map(dapp => dapp.port), ...repositories.map(dapp => dapp.port)])
+            const usedPorts = new Set([...communityDapps_.map(dapp => dapp.port), ...repositories.map(dapp => dapp.port)])
             const startingPort = 3000
 
-            for(let i = 0; i < communityDapps.length; i++) {
-                const dapp = communityDapps[i]
+            for(let i = 0; i < communityDapps_.length; i++) {
+                const dapp = communityDapps_[i]
                 let port = parseInt(dapp.port.toString())
 
                 if(usedPorts.has(port)) {
@@ -55,7 +55,7 @@ export default function useCommunityDapp(context) {
                     while(usedPorts.has(newPort)) {
                         newPort++
                     }
-                    communityDapps[i] = { ...dapp, port: newPort }
+                    communityDapps_[i] = { ...dapp, port: newPort }
                     port = newPort
                 }
     
@@ -63,7 +63,7 @@ export default function useCommunityDapp(context) {
             }
 
             const communityLinks = dappArray.filter(f => !isValidLocalDapp(f) && isValidLinkDapp(f))
-            setCommunityDapps([...communityDapps, ...communityLinks])
+            setCommunityDapps([...communityDapps_, ...communityLinks])
         }
         
         // setCommunityLists(context?.data?.communityDapps || [])
@@ -80,8 +80,48 @@ export default function useCommunityDapp(context) {
                     data: response,
                     updated: new Date().getTime()
                 }
-                return result
+                
+                try {                    
+                    // Get all existing folder names
+                    const usedFolders = new Set([
+                        ...communityDapps.map(dapp => dapp?.folder),
+                        ...repositories.map(dapp => dapp?.folder)
+                    ])
+
+                    response.dapps = response.dapps.map(dapp => {
+                        // Check if this dapp already exists (same name from same URL)
+                        const existingDapp = communityDapps.find(existing => 
+                            existing.communityUrl?.toLowerCase() === url.toLowerCase() && 
+                            existing.name?.toLowerCase() === dapp.name?.toLowerCase()
+                        )
+
+                        if (existingDapp) {
+                            // Keep the existing folder name if dapp exists
+                            return {
+                                ...dapp,
+                                folder: existingDapp.folder
+                            }
+                        } else {
+                            // Generate new unique folder name if needed
+                            let newFolder = dapp.folder
+                            while (usedFolders.has(newFolder)) {
+                                newFolder = dapp.folder + Math.floor(Math.random() * 1000000).toString()
+                            }
+                            usedFolders.add(newFolder)
+                            return {
+                                ...dapp,
+                                folder: newFolder
+                            }
+                        }
+                    })
+
+                    return result
+                } catch(e) {
+                    console.error('Error processing dapps:', e)
+                    return result
+                }
             } catch(e) {
+                console.error('Error validating list:', e)
                 return null
             }
         }

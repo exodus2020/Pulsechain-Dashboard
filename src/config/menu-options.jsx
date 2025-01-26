@@ -1,11 +1,6 @@
 import { icons_list } from "./icons"
 
 export const menuOptions = [
-    // {
-    //     name: "Dashboard",
-    //     icon: icons_list.coin,
-    //     action: 'activity'
-    // },
     {
         name: "Wallets",
         icon: icons_list.wallet,
