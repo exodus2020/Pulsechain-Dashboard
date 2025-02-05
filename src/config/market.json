@@ -10,6 +10,13 @@
             "tags": ["Utility","Strorage","File-Sharing"],
             "description": "LunarShard is a decentralized storage platform that allows users to store and share files in an immutable and censorship-resistant manner.",
             "port": 3001
+        },
+        {
+            "name": "Pump.tires",
+            "icon": "https://gitlab.com/pulsechain-lunagray/pulsechain-dashboard/-/raw/main/public/icons/pumptires.png?ref_type=heads?ref_type=heads",
+            "webUrl": "https://pumptires.com",
+            "tags": ["Meme", "Swap"],
+            "description": "The easiest way to create and launch coins on PulseChain."
         }
     ]
 }
