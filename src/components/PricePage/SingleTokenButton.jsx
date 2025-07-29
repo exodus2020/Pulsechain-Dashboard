@@ -6,6 +6,8 @@ import { tokenModalAtom } from "../../store";
 import LoadingWave from "../LoadingWave";
 import { addCommasToNumber, formatNumber, fUnit, fUnitSub } from "../../lib/numbers";
 
+const background = 'linear-gradient(to bottom, rgba(50, 50, 50, 0.3), rgba(50, 50, 50, 0.1))'
+
 export default memo(SingleTokenButton)
 function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, watchlistData, token = undefined, tokenAddress = undefined }) {
     const [ singleTokenModal, setSingleTokenModal ] = useAtom(tokenModalAtom)
@@ -22,6 +24,7 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
                 marginTop: 5,
                 padding: '15px 25px',
                 position: 'relative',
+                background: background
             }}
         >
             <div className="price-button" style={{ position: 'relative' }}>
@@ -102,6 +105,7 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
                     marginTop: 5,
                     padding: '15px 25px',
                     position: 'relative',
+                    background: background
                 }}
                 onClick={() => {
                     setSingleTokenModal(priceInfo);
@@ -113,7 +117,7 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
                         <ImageContainer source={image} size={35}/>
                     </div>
                     <div>
-                        <div style={{ fontSize: 18, width: 325 }}>{priceInfo.name}</div>
+                        <div style={{ fontSize: 18, width: 325 }} className="price-name">{priceInfo.name}</div>
                         <div
                             style={{
                                 fontSize: 14,
@@ -145,7 +149,7 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
                             }}
                         >
                             <span style={{ color: 'rgb(200,200,200)' }}>$</span>{' '}
-                            <span style={{ fontFamily: "'Oswald', sans-serif"}}>
+                            <span style={{ fontFamily: "'Oswald', sans-serif"}} className="price-balance">
                                 {priceInfo.otherValue || balanceUsd}
                             </span>
                         </div>

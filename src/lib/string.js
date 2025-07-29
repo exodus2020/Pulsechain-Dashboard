@@ -1,8 +1,12 @@
-export function shortenString(str) {
-    if (str.length < 9) {
+export function shortenString(str, length = 8, shortenEnd = false) {
+    if (str.length < length + 1) {
         return str;
     }
-    return str.slice(0, 4) + "..." + str.slice(-4);
+    if (shortenEnd) {
+        return str.slice(0, length) + "...";
+    } else {
+        return str.slice(0, Math.ceil(length / 2)) + "..." + str.slice(-Math.ceil(length / 2));
+    }
 }
 
 export function normalizeSpacing(input) {

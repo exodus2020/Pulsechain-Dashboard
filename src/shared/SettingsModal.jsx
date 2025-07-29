@@ -17,8 +17,8 @@ const ModalWrapper = styled.div`
   position: absolute; top: 0; left: 0; height: 100vh; width: 100vw;
   user-select: none;
   z-index: 100;
-  background: rgba(30,30,30, 0.9);
-  backdrop-filter: blur(3px);
+  background: linear-gradient(to bottom, rgba(50, 50, 50, 0.6), rgba(0, 0, 0, 0.9));
+  backdrop-filter: blur(6px);
   overflow: hidden;
 
   .close-button {
@@ -68,6 +68,15 @@ const ModalContent = styled.div`
     align-items: center; /* Aligns items vertically */
     gap: 8px; /* Adds space between the icon and text */
     font-size: 20px; /* Adjust as needed for your text size */
+  }
+
+  @media (max-width: 650px) {
+    width: 100dvw;
+    max-width: 100dvw;
+    min-width: 100dvw;
+    top: 0px; transform: translateX(-50%) translateY(0%);
+    min-height: 100dvh;
+    max-height: 100dvh;
   }
 `
 
@@ -156,6 +165,41 @@ function SettingsModal({ context }) {
     }
   }
 
+  const handleFileSelect = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    try {
+        const text = await file.text();
+        await window.electron.saveFile('config.json', text)
+        window.location.reload()
+    } catch (error) {
+        console.error('Error reading file:', error);
+        onFileContent(null);
+    }
+  }
+
+  const handleExportData = async () => {
+    const dataToExport = await window.electron.loadFile('config.json')
+    const blob = new Blob([dataToExport], { type: 'text/plain' });
+  
+    // Create a temporary URL for the blob
+    const url = window.URL.createObjectURL(blob);
+    
+    // Create a temporary link element
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'plsdash-export.txt';
+    
+    // Programmatically click the link to trigger download
+    document.body.appendChild(link);
+    link.click();
+    
+    // Clean up
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  }
+
   return (
     <ModalWrapper>
       <ModalContent>
@@ -186,7 +230,7 @@ function SettingsModal({ context }) {
                   clearOnSubmit={true}
                   containerStyle={{ gridTemplateColumns: '1fr 110px' }}
                 />
-                {!passwordComplete ? <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '10px', marginTop: 15 }}>
+                {!passwordComplete ? <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '10px', marginTop: 15 }} className="desktop-only">
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {key === '' ? 'Add' : 'Update'} Password
                   </div>
@@ -204,7 +248,26 @@ function SettingsModal({ context }) {
                     type="password"
                     containerStyle={{ gridTemplateColumns: '1fr 110px' }}
                   />
-                </div> : <div style={{ paddingTop: 15, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Password Updated!</div>}
+                </div> : <div style={{ paddingTop: 15, display: 'flex', alignItems: 'center', justifyContent: 'center' }} className="desktop-only">Password Updated!</div>}
+                {!passwordComplete ? <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px', marginTop: 15 }} className="mobile-only">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {key === '' ? 'Add' : 'Update'} Password
+                  </div>
+                  <Input 
+                    placeholder={!keymatch ? 'Enter current password' 
+                      : keymatch && passwordValue === undefined ? 'Enter new password'
+                      : keymatch && passwordValue !== undefined ? 'Confirm new password'
+                      : 'Err'
+                    } 
+                    buttonText={'Confirm'} 
+                    onSubmit={handlePasswordConfirm}
+                    disabled={isChecking}
+                    error={error}
+                    clearOnSubmit={true}
+                    type="password"
+                    containerStyle={{ gridTemplateColumns: '1fr 110px' }}
+                  />
+                </div> : <div style={{ paddingTop: 15, display: 'flex', alignItems: 'center', justifyContent: 'center' }}  className="mobile-only">Password Updated!</div>}
               </div>
             </div>
           </div>
@@ -216,6 +279,16 @@ function SettingsModal({ context }) {
               updateSettings(defaultSettings)
               setModal(false)
             }} textAlign="center">Default Settings</Button>
+            <Button onClick={handleExportData} textAlign="center">Export Data</Button>
+            {/* <Button onClick={handleSave} textAlign="center">Import Data</Button> */}
+            <label style={{ cursor: 'pointer', position: 'relative' }}>
+              <Button textAlign="center" style={{ pointerEvents: 'none' }}>Import Data</Button>
+              <input
+                type="file"
+                onChange={handleFileSelect}
+                style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0 }}
+              />
+            </label>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '0px 40px' }}>
           <div>

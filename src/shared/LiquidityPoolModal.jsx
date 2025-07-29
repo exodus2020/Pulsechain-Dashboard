@@ -9,7 +9,6 @@ import { useAppContext } from './AppContext'
 import ImageContainer from '../components/ImageContainer'
 import { shortenString } from '../lib/string'
 import Tooltip from './Tooltip'
-import { useDapp } from '../hooks/useDapp'
 import { addCommasToNumber, formatNumber } from '../lib/numbers'
 import { useCopyToClipboard } from '../hooks/useCopyToClipboard'
 import { findPairVersion } from '../lib/web3'
@@ -19,8 +18,8 @@ const ModalWrapper = styled.div`
   position: absolute; top: 0; left: 0; height: 100vh; width: 100vw;
   user-select: none;
   z-index: 100;
-  background: rgba(30,30,30, 0.9);
-  backdrop-filter: blur(3px);
+  background: linear-gradient(to bottom, rgba(50, 50, 50, 0.6), rgba(0, 0, 0, 0.9));
+  backdrop-filter: blur(6px);
   overflow: hidden;
 
   .close-button {
@@ -94,6 +93,15 @@ const ModalContent = styled.div`
     gap: 8px; /* Adds space between the icon and text */
     font-size: 20px; /* Adjust as needed for your text size */
   }
+
+  @media (max-width: 650px) {
+    width: 100dvw;
+    max-width: 100dvw;
+    min-width: 100dvw;
+    top: 0px; transform: translateX(-50%) translateY(0%);
+    min-height: 100dvh;
+    max-height: 100dvh;
+  }
 `
 
 const RepoItem = styled.div`
@@ -112,8 +120,6 @@ function LiquidityPoolModal() {
   const [ modal, setModal ] = useAtom(liquidityPoolModalAtom)
   const [ tokensModal, setTokensModal ] = useAtom(tokensModalAtom)
   const context = useAppContext()
-  const [ dappModal, setDappModal ] = useAtom(dappModalAtom)
-  const { isInstalled, isLoading, launchDapp } = useDapp('pulsex')
   const { copyTextToClipboard } = useCopyToClipboard()  
   const handleCopy = (text) => {
     copyTextToClipboard(text, `${shortenString(text)} copied to clipboard`, 'Failed to copy')
@@ -251,19 +257,19 @@ function LiquidityPoolModal() {
               </div>
             </div>
             <div>
-              {!isInstalled ?<div style={{ textAlign: 'center' }}>
-                <div>PulseX has not been downloaded.</div>
+              {false ?<div style={{ textAlign: 'center' }}>
+                {/* <div>PulseX has not been downloaded.</div>
                 <div style={{ marginBottom: 10, marginTop: 10 }}>Download PulseX to view this token locally</div>
                 <Button onClick={() => {
                   setDappModal(true)
                   setModal(false)
                 }} textAlign='center'>
                   Download PulseX
-                </Button>
+                </Button> */}
               </div> 
               : <div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <Button onClick={() => {
+                  {/* <Button onClick={() => {
                       if(isInstalled) launchDapp(`#/info/${!version.current ? 'v2/' : version.current === 'v2' ? 'v2/' : ''}token/${t0}`)
                       if(!isInstalled) {
                         setDappModal(true)
@@ -284,10 +290,10 @@ function LiquidityPoolModal() {
                     {isLoading ? 'Loading...' : 
                       isInstalled ?  `View ${token1display} on PulseX` : 
                       `View ${token1display} on PulseX`}
-                  </Button>
+                  </Button> */}
                 </div>
                 <div style={{ marginTop: 10 }}>
-                  <Button onClick={() => {
+                  {/* <Button onClick={() => {
                       if(isInstalled) launchDapp(`#/info/${!version.current ? 'v2/' : version.current === 'v2' ? 'v2/' : ''}pool/${poolData?.lpAddress}`)
                       if(!isInstalled) {
                         setDappModal(true)
@@ -297,11 +303,11 @@ function LiquidityPoolModal() {
                     {isLoading ? 'Loading...' : 
                       isInstalled ? 'View Pair on PulseX' : 
                       'View Pair on PulseX'}
-                  </Button>
+                  </Button> */}
                 </div>
 
-                {!isLpwatchlist ? <div style={{ marginTop: 10 }}>
-                  <Button onClick={() => {
+                {false ? <div style={{ marginTop: 10 }}>
+                  {/* <Button onClick={() => {
                       if(isInstalled) launchDapp(`#/farms`)
                       if(!isInstalled) {
                         setDappModal(true)
@@ -311,7 +317,7 @@ function LiquidityPoolModal() {
                     {isLoading ? 'Loading...' : 
                       isInstalled ? 'View Farms on PulseX' : 
                       'View Farms on PulseX'}
-                  </Button>
+                  </Button> */}
                 </div> : ''}
 
                 {/* <div style={{ marginTop: 10 }}>

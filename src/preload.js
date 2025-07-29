@@ -33,8 +33,10 @@ contextBridge.exposeInMainWorld('electron', {
   deleteFile: (filename) => ipcRenderer.invoke('delete-file', filename),
   checkVersion: (folder) => ipcRenderer.invoke('checkVersion', folder),
   getFile: (url) => ipcRenderer.invoke('getFile', url),
-  serveWebapp: (folder, port) => ipcRenderer.invoke('serve-webapp', folder, port),
+  serveWebapp: (folder, port, buildPath) => ipcRenderer.invoke('serve-webapp', folder, port, buildPath),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   cloneRepo: (repoUrl, folder) => ipcRenderer.invoke('clone-repo', repoUrl, folder),
-  stopServer: (folder) => ipcRenderer.invoke('stop-server', folder)
+  stopServer: (folder) => ipcRenderer.invoke('stop-server', folder),
+  toggleMode: (height, width) => ipcRenderer.invoke('toggle-mode', height, width),
+  getMode: () => ipcRenderer.invoke('get-mode'),
 })

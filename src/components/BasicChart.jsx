@@ -195,33 +195,60 @@ function BasicChart({
         const chartWidth = width - margin.left - margin.right
         const chartHeight = height - margin.top - margin.bottom
 
-        // Get min/max values
-        const yValues = data.map(d => d[yKey])
+        // Get min/max values with safety checks
+        const yValues = data.map(d => Number(d[yKey])).filter(val => !isNaN(val) && isFinite(val))
+        if (yValues.length === 0) return  // Exit if no valid values
+
         const minY = Math.min(...yValues)
         const maxY = Math.max(...yValues)
-        const yRange = maxY === minY ? maxY * 0.1 : maxY - minY
+        // Add padding to range to prevent flat line
+        const yPadding = (maxY - minY) * 0.1
+        const yRange = maxY === minY ? maxY : (maxY - minY) + yPadding
 
-        // Scale functions
+        // Scale functions with safety checks
         const scaleX = (x) => {
-            const xMin = data[0][xKey]
-            const xMax = data[data.length - 1][xKey]
-            return margin.left + ((x - xMin) / (xMax - xMin)) * chartWidth
+            try {
+                const xMin = data[0][xKey]
+                const xMax = data[data.length - 1][xKey]
+                // If timespan is less than an hour, adjust the scale
+                const timeSpan = xMax - xMin
+                const hourInMs = 3600000
+                const scaleFactor = timeSpan < hourInMs ? hourInMs / timeSpan : 1
+                return margin.left + ((x - xMin) / ((xMax - xMin) * scaleFactor)) * chartWidth
+            } catch (error) {
+                console.warn('Error in scaleX:', error)
+                return margin.left
+            }
         }
 
         const scaleY = (y) => {
-            if (maxY === minY) {
-                const midPoint = height / 2
-                return midPoint
+            try {
+                if (maxY === minY) {
+                    // If all values are the same, create artificial range
+                    const midPoint = height / 2
+                    const range = maxY * 0.1 // 10% of the value
+                    return midPoint + ((y - maxY) / range) * (chartHeight / 2)
+                }
+                return height - margin.bottom - ((y - minY) / yRange) * chartHeight
+            } catch (error) {
+                console.warn('Error in scaleY:', error)
+                return height - margin.bottom
             }
-            return height - margin.bottom - ((y - minY) / yRange) * chartHeight
         }
 
-        // Draw grid
+        // Draw grid with safety checks
         ctx.beginPath()
         ctx.strokeStyle = gridColor
 
+        // Adjust x interval based on data range
+        const timeSpan = data[data.length - 1][xKey] - data[0][xKey]
+        const hourInMs = 3600000
+        const adjustedXInterval = timeSpan < hourInMs * 24 ? 
+            Math.max(1, Math.floor(data.length / 6)) : // For short timeframes
+            xInterval
+
         // Vertical grid lines
-        for (let i = 0; i < data.length; i += xInterval) {
+        for (let i = 0; i < data.length; i += adjustedXInterval) {
             const x = scaleX(data[i][xKey])
             ctx.moveTo(x, margin.top)
             ctx.lineTo(x, height - margin.bottom)
@@ -236,19 +263,29 @@ function BasicChart({
         }
         ctx.stroke()
 
-        // Draw animated line
+        // Draw animated line with safety checks
         ctx.beginPath()
         ctx.strokeStyle = lineColor
         ctx.lineWidth = 2
 
         const animatedLength = Math.floor(data.length * animationProgress)
+        let hasStarted = false
+
         data.slice(0, animatedLength).forEach((point, i) => {
-            const x = scaleX(point[xKey])
-            const y = scaleY(point[yKey])
-            if (i === 0) {
-                ctx.moveTo(x, y)
-            } else {
-                ctx.lineTo(x, y)
+            try {
+                const x = scaleX(point[xKey])
+                const y = scaleY(point[yKey])
+                
+                if (isNaN(x) || isNaN(y)) return
+                
+                if (!hasStarted) {
+                    ctx.moveTo(x, y)
+                    hasStarted = true
+                } else {
+                    ctx.lineTo(x, y)
+                }
+            } catch (error) {
+                console.warn('Error drawing line segment:', error)
             }
         })
         ctx.stroke()

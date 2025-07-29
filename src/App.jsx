@@ -30,6 +30,9 @@ import Icon from './components/Icon'
 import { icons_list } from './config/icons'
 import useUpdateSettings from './hooks/useUpdateSettings'
 import useCommunityDapp from './hooks/useCommunityDapp'
+import useHotKeys from './hooks/useHotKeys'
+import MiniPage from './pages/MiniPage'
+import { useGasEstimates } from './hooks/useGasEstimates'
 
 const GlobalStyle = createGlobalStyle`
   @font-face {
@@ -42,7 +45,7 @@ const GlobalStyle = createGlobalStyle`
 `
 
 const AppWrapper = styled.div`
-  height: 100vh; width: 100vw;
+  height: 100dvh; width: 100dvw;
   position: absolute; top: 0; left: 0; overflow: hidden;
   background: black;
   background-image: linear-gradient(to top, rgba(19, 21, 25, 0), rgb(19, 21, 25)) !important;
@@ -83,6 +86,18 @@ const AppWrapper = styled.div`
       fill: rgb(80,80,80)
     }
   }
+
+  @media (min-width: 650px) {
+      .mobile-only {
+          display: none !important;
+      }
+  }
+
+  @media (max-width: 650px) {
+      .desktop-only {
+          display: none !important;
+      }
+  }
 `
 
 function App() {
@@ -120,12 +135,7 @@ function AppContext() {
     </AppWrapper>
   }
 
-  return (
-    <AppWrapper>
-        <AppMain context={context}/>
-    </AppWrapper>
-    
-  )
+  return (<AppMain context={context}/>)
 }
 
 function AppMain({context}) {
@@ -138,6 +148,9 @@ function AppMain({context}) {
   const [ liquidityPoolModal ] = useAtom(liquidityPoolModalAtom)
   const [ liquiditySearchModal ] = useAtom(liquiditySearchModalAtom)
   const [ toast, setToast ] = useAtom(toastAtom)
+  const [settings] = useAtom(appSettingsAtom)
+
+  const { mode, toggleMode } = useHotKeys()
 
   useUpdateSettings({ context })
   const priceData = usePrice(context)
@@ -147,6 +160,9 @@ function AppMain({context}) {
   const lpData = useLPs({context, priceData})
   const historyData = useHistory({ priceData })
   const communityData = useCommunityDapp(context)
+
+  //const settings = context?.data?.settings
+  const fees = useGasEstimates(settings);
 
   const removeToast = useCallback((id) => {
     setToast(prev => ({
@@ -159,25 +175,31 @@ function AppMain({context}) {
   const bestStable = priceData?.bestStable
   const prices = priceData.prices  
 
+  if (mode) {
+    return <MiniPage priceData={priceData} historyData={historyData} bestStable={bestStable} wplsPrice={wplsPrice} getImage={context?.getImage} toggleMode={toggleMode}/>
+  }
+
   return (
     <AppWrapper>
-        <Layout>
+        <Layout fees={fees} toggleMode={toggleMode}>
           {!appPage ? <WalletsPage priceData={priceData} balanceData={balanceData} farmData={farmData} lpData={lpData} historyData={historyData} hexData={hexData}/> : ''}
           {appPage == 'activities' ? <ActivitiesPage priceData={priceData} balanceData={balanceData} farmData={farmData}/> : ''}
         </Layout>
-        {modal ? <DappModal communityData={communityData} /> : ''}
-        {tokenModal ? <TokensModal wplsPrice={wplsPrice} /> : ''}
-        {singleTokenModal ? <TokenModal historyData={historyData} bestStable={bestStable}/> : ''}
-        {walletsModal ? <WalletsModal balanceData={balanceData} farmData={farmData} lpData={lpData} prices={prices} hexData={hexData}/> : ''}
-        {settingsModal ? <SettingsModal context={context} /> : ''}
-        {liquidityPoolModal ? <LiquidityPoolModal /> : ''}
-        {liquiditySearchModal ? <LiquiditySearchModal /> : ''}
-        {toast.messages.length > 0 && (
-          <Toast 
-            messages={toast.messages}
-            onRemove={removeToast}
-          />
-        )}
+        <div className="small-on-mobile">
+          {modal ? <DappModal communityData={communityData} /> : ''}
+          {tokenModal ? <TokensModal wplsPrice={wplsPrice} /> : ''}
+          {singleTokenModal ? <TokenModal balanceData={balanceData} historyData={historyData} bestStable={bestStable}/> : ''}
+          {walletsModal ? <WalletsModal balanceData={balanceData} farmData={farmData} lpData={lpData} prices={prices} hexData={hexData}/> : ''}
+          {settingsModal ? <SettingsModal context={context} /> : ''}
+          {liquidityPoolModal ? <LiquidityPoolModal /> : ''}
+          {liquiditySearchModal ? <LiquiditySearchModal /> : ''}
+          {toast.messages.length > 0 && (
+            <Toast 
+              messages={toast.messages}
+              onRemove={removeToast}
+            />
+          )}
+        </div>
     </AppWrapper>
     
   )

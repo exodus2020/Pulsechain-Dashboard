@@ -1,8 +1,10 @@
 import Web3 from 'web3'
 import { hexAbi } from './abi/hex-abi'
+import { hexInstanceAbi } from './abi/hex-instance-abi'
 import { defaultSettings } from '../config/settings'
 
 const HEX_CONTRACT = '0x2b591e99afe9f32eaa6214f7b7629768c40eeb39'
+const HEX_INSTANCE_CONTRACT = '0x8BD3d1472A656e312E94fB1BbdD599B8C51D18e3'
 const BATCH_SIZE = 25
 
 export const getHexCurrentDay = async (settings = defaultSettings) => {
@@ -14,6 +16,156 @@ export const getHexCurrentDay = async (settings = defaultSettings) => {
     } catch (error) {
         console.error('Error fetching HEX current day:', error)
         return 0
+    }
+}
+
+export const batchFetchHexInstance = async (walletAddresses, currentDay, settings = defaultSettings) => {
+    try {
+        const web3 = new Web3(settings.rpcs.mainnet[0])
+        const instanceContract = new web3.eth.Contract(hexInstanceAbi, HEX_INSTANCE_CONTRACT)
+        const hsiCountResults = {}
+        
+        await new Promise((resolve, reject) => {
+            try {
+                const batch = new web3.BatchRequest()
+                let completed = 0
+
+                walletAddresses.forEach((address, index) => {
+                    batch.add(
+                        instanceContract.methods.stakeCount(address).call.request({}, (error, count) => {
+                            if (error) {
+                                // no HSI stakes
+                            } else {
+                                hsiCountResults[address] = Number(count)
+                            }
+                            completed++
+                            if (completed === walletAddresses.length) {
+                                resolve(hsiCountResults)
+                            }
+                        })
+                    )
+                })
+
+                batch.execute()
+            } catch (e) {
+                console.error('Error in stake count batch:', e)
+                reject(e)
+            }
+        })
+
+        const hsiAddressResults = []
+        const required = Object.keys(hsiCountResults).reduce((acc, address) => acc + hsiCountResults[address], 0)
+
+        if (required === 0) {
+            return {}
+        }
+
+        await new Promise((resolve, reject) => {
+            try {
+                const batch = new web3.BatchRequest()
+                
+                let completed = 0
+                
+
+                Object.keys(hsiCountResults).forEach((address) => {
+                    const hsiListLength = hsiCountResults[address]
+                    for(let i = 0; i < hsiListLength; i++) {
+                        batch.add(
+                            instanceContract.methods.hsiLists(address, i).call.request({}, (error, hexAddress) => {
+                                if (error) {
+                                    console.error(`Error fetching stake count for ${address}:`, error)
+                                } else {
+                                    hsiAddressResults.push({ address: hexAddress, stakeIndex: 0, parent: address})
+                                }
+                                completed++
+                                if (completed === required) {
+                                    resolve(hsiAddressResults)
+                                }
+                            })
+                        )
+                    }
+                })
+
+                batch.execute()
+            } catch (e) {
+                console.error('Error in stake count batch:', e)
+                reject(e)
+            }
+        })
+        
+        // Process stake requests in batches of BATCH_SIZE
+        const results = {}
+        const hexContract = new web3.eth.Contract(hexAbi, HEX_CONTRACT)
+        for (let i = 0; i < hsiAddressResults.length; i += BATCH_SIZE) {
+            const batch = hsiAddressResults.slice(i, i + BATCH_SIZE)
+            const batchResults = await new Promise((resolve, reject) => {
+                try {
+                    const web3Batch = new web3.BatchRequest()
+                    const batchData = []
+                    let completed = 0
+
+                    batch.forEach(({ address, stakeIndex, parent }) => {
+                        web3Batch.add(
+                            hexContract.methods.stakeLists(address, stakeIndex).call.request({}, (error, stake) => {
+                                if (error) {
+                                    console.error(`Error fetching stake ${stakeIndex} for ${address}:`, error)
+                                } else {
+                                    const stakedHex = parseFloat( BigInt(stake.stakedHearts) / BigInt(10**4) ) / 10**4
+                                    const daysRemaining =  Number(stake.unlockedDay) !== 0 
+                                        ? (Number(stake.lockedDay) + Number(stake.stakedDays)) - Number(stake.unlockedDay)
+                                        : (Number(stake.lockedDay) + Number(stake.stakedDays)) - currentDay
+
+                                    const effectiveLateDays = daysRemaining < -14 ? daysRemaining + 14 : 0
+                                    const effectivePenalty = stakedHex * effectiveLateDays / Number(stake.stakedDays) / 10
+
+                                    batchData.push({
+                                        address: parent,
+                                        stakeIndex,
+                                        stake: {
+                                            address: address,
+                                            parent: parent,
+                                            stakeId: stake.stakeId,
+                                            stakedHearts: stake.stakedHearts,
+                                            stakeShares: stake.stakeShares,
+                                            lockedDay: Number(stake.lockedDay),
+                                            stakedDays: Number(stake.stakedDays),
+                                            unlockedDay: Number(stake.unlockedDay),
+                                            isAutoStake: stake.isAutoStake,
+                                            tShares: parseFloat( BigInt(stake.stakeShares) / BigInt(10**6)) / 10**6,
+                                            stakedHex,
+                                            daysRemaining,
+                                            effectivePenalty
+                                        }
+                                    })
+                                }
+                                completed++
+                                if (completed === batch.length) {
+                                    resolve(batchData)
+                                }
+                            })
+                        )
+                    })
+
+                    web3Batch.execute()
+                } catch (e) {
+                    console.error('Error in stakes batch:', e)
+                    reject(e)
+                }
+            })
+            
+            // Organize results by address
+            batchResults.forEach(({ address, stake }) => {
+                if (!results[address]) {
+                    results[address] = []
+                }
+                results[address].push(stake)
+            })
+        }
+        return results
+
+    } catch (error) {
+        console.error('Error in batchFetchHexInstance:', error)
+        return {}
     }
 }
 
@@ -91,6 +243,7 @@ export const batchFetchHex = async (walletAddresses, currentDay, settings = defa
                                         stakeIndex,
                                         stake: {
                                             address: address,
+                                            parent: address,
                                             stakeId: stake.stakeId,
                                             stakedHearts: stake.stakedHearts,
                                             stakeShares: stake.stakeShares,
@@ -156,20 +309,24 @@ export const parseHexStats = (stakesArray = []) => {
             return acc + (totalHex < 0 ? totalHex : penalty)}, 0
         )
 
+        const nextStake = activeStakes.length > 0 ?  activeStakes.find(stake => stake?.daysRemaining === daysUntilNextStake) : undefined
+
+        const averageStakeLength = activeStakes.reduce((acc, stake) => acc + (stake?.stakedDays ?? 0), 0) / activeStakes.length
+
         const result = {
             totalTShares: activeStakes.reduce((acc, stake) => acc + (stake?.tShares ?? 0), 0),
             totalStakedHex,
             totalHexYield,
             totalEffectivePenalty,
             totalFinalHex: totalStakedHex + totalHexYield + totalEffectivePenalty < 0 ? 0 : totalStakedHex + totalHexYield + totalEffectivePenalty,
-            averageStakeLength: activeStakes.reduce((acc, stake) => acc + (stake?.stakedDays ?? 0), 0) / activeStakes.length,
+            averageStakeLength: typeof averageStakeLength === 'number' ? averageStakeLength.toFixed(1) : 0,
             daysUntilNextStake: daysUntilNextStake,
-            nextStakeAddress: activeStakes.length > 0 ? 
-                activeStakes.find(stake => stake?.daysRemaining === daysUntilNextStake)?.address : 
-                '',
+            nextStakeAddress: nextStake ? nextStake?.address : '',
+            nextStakeType : !nextStake ? '' : nextStake?.parent !== nextStake?.address ? 'HSI' : '',
             totalStakes: stakes.length,
             totalActiveStakes: activeStakes.length,
             totalGaStakes: gaStakes.length,
+            totalInstances: stakes.filter(f => f?.address !== f?.parent).length
         }
         return result
     } catch (error) {
@@ -186,6 +343,7 @@ export const parseHexStats = (stakesArray = []) => {
             totalStakes: 0,
             totalActiveStakes: 0,
             totalGaStakes: 0,
+            totalInstances: 0
         }
     }
 }

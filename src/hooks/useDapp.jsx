@@ -36,7 +36,7 @@ export function useDapp(repoName) {
 
         try {
             // Start server and update global status
-            await window.electron.serveWebapp(repo.folder, repo.port)
+            await window.electron.serveWebapp(repo.folder, repo.port, repo?.buildPath)
             
             // Update the global server status atom
             setRunningServers(prev => ({

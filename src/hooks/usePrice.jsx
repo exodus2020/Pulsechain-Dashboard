@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react"
 import { useAtom } from "jotai"
-import { appSettingsAtom } from "../store"
+import { appErrorAtom, appSettingsAtom } from "../store"
 import { batchQueryReserves } from "../lib/web3"
-import { convertInvertedPricePairToPrice, convertPricePairToPrice, liquidityPairs } from "../lib/tokens"
+import { convertPricePairToPrice, liquidityPairs } from "../lib/tokens"
 
 export default function usePrice(context) {
     const [prices, setPrices] = useState({})
@@ -14,6 +14,7 @@ export default function usePrice(context) {
     const [isLoading, setIsLoading] = useState(false)
     const bestStableRef = useRef({ pair: null, symbol: null, price: 0, invert: false })
     const [stableUpdated, setStableUpdated] = useState(0)
+    const setError = useAtom(appErrorAtom)[1]
 
     const watchlist = context?.data?.watchlist ?? {}
     const contextInitialized = context?.initialized 
@@ -67,6 +68,16 @@ export default function usePrice(context) {
             const wplsusdc = pricePairs['0x6753560538eca67617a9ce605178f788be7e524e']
             const wplsusdt = pricePairs['0x322df7921f28f1146cdf62afdac0d6bc0ab80711']
 
+            // If the price was not retrieved successfully, exit
+            // This will refresh later.
+            if (wplsdai.reserve0 == 0 || wplsdai.reserve1 == 0 ) {
+                setError(prev => {
+                    const newErrors = [... prev]
+                    newErrors.push({ msg: 'Unable to connect to RPC', acknowledged: false, id: 'rpc' })
+                    return newErrors
+                })
+                return
+            }
             // DAI/WPLS: reserve0 is DAI (18 decimals), reserve1 is WPLS (18 decimals)
             const wplsPriceInDAI = convertPricePairToPrice(wplsdai, 18, 18)
 
@@ -122,7 +133,7 @@ export default function usePrice(context) {
             }
 
             const pricePairsKeys = Object.keys(pricePairs)
-            for (let i = 0; i < pricePairsKeys.length; i++) {
+            for (let i = 0; i < pricePairsKeys.length; i++) { 
                 const key = pricePairsKeys[i]
                 const pair = pricePairs[key]
                 const pairInfo = liquidityPairs?.[key] ?? watchlist?.[key] ?? undefined
@@ -171,6 +182,7 @@ export default function usePrice(context) {
                     pairId: key.toLowerCase(),
                     name: token0.name,
                     invertReserves,
+
                     symbol: token0.symbol,
                     decimals: token0.decimals,
                     reserve0: actualReserve0,

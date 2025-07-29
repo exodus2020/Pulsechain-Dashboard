@@ -14,6 +14,12 @@ export const liquidityPoolModalAtom = atom(null);
 export const iframeSrcAtom = atom(null);
 export const expandedAtom = atom(true);
 export const serverStatusAtom = atom({});
+export const timeframeAtom = atom('7D')
+export const walletSortAtom = atom('Total Value')
+export const walletSortDirectionAtom = atom('Descending')
+
+// { msg: string, acknowledged: false, id: string }[]
+export const appErrorAtom = atom([]);
 
 export const pricePairsAtom = atom({});
 export const appPageAtom = atom('')

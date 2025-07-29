@@ -1,7 +1,7 @@
 import { useAtom } from "jotai"
 import { useState, useEffect, useRef } from "react"
 import { appSettingsAtom } from "../store"
-import { batchFetchHex, getHexCurrentDay, getHexDailyData, parseHexStats } from "../lib/hex"
+import { batchFetchHex, batchFetchHexInstance, getHexCurrentDay, getHexDailyData, parseHexStats } from "../lib/hex"
 
 export default function useHex({ wallets }) {
     const [hexStakes, setHexStakes] = useState({})
@@ -21,7 +21,7 @@ export default function useHex({ wallets }) {
         let newDailyData = [...dailyData]
         if (currentDayRef.current !== currentDay || dailyData.length === 0) {
             try {
-                newDailyData = await getHexDailyData(currentDay)
+                newDailyData = await getHexDailyData(currentDay, settings)
             } catch (e) {
                 console.error('Error fetching daily data:', e)
             }
@@ -37,8 +37,18 @@ export default function useHex({ wallets }) {
         }, {})
 
         if (missingAddresses.length > 0) {
-            console.log('fetching stakes')
+            const instancesResults = await batchFetchHexInstance(missingAddresses, currentDay, settings)
+            const instances = !instancesResults || typeof instancesResults !== 'object' ? {} : instancesResults
             const stakes = await batchFetchHex(missingAddresses, currentDay, settings)
+
+            Object.keys(instances).forEach(address => {
+                if (stakes?.[address]) {
+                    instances[address].forEach(instance => {
+                        stakes[address].push(instance)
+                    })
+                }
+            })
+
             walletStakes = {...walletStakes, ...stakes}
         }
         addresses.forEach(a => walletStakes[a] = !walletStakes?.[a] ? [] : walletStakes[a])
@@ -150,7 +160,7 @@ export default function useHex({ wallets }) {
 
     useEffect(() => {
         const getCurrentDay = async () => {
-            const newCurrentDay = await getHexCurrentDay()
+            const newCurrentDay = await getHexCurrentDay(settings)
             if(currentDay !== newCurrentDay) setCurrentDay(newCurrentDay)
         }
 

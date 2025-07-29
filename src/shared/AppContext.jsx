@@ -6,7 +6,8 @@ import { appSettingsAtom, hiddenWalletsAtom, keyAtom, urlsFetchedAtom } from '..
 import { useAtom } from 'jotai';
 import { decryptWithHashedKey, encryptWithHashedKey } from '../lib/crypto';
 import { defaultSettings } from '../config/settings';
-import defaultMarket from "../config/market.json"
+import { tokenref } from "../config/tokenref.js";
+import defaultMarket from "../config/market.json";
 
 export const AppContext = createContext({});
 
@@ -22,7 +23,8 @@ const defaultContext = {
     imageRef: {},
     wallets: {},
     communityDapps: [defaultCommunityDapps],
-    settings: defaultSettings
+    settings: defaultSettings,
+    aliases: {}
 }
 
 export const initData = async (key) => {
@@ -72,6 +74,12 @@ export const AppContextProvider = ({ children }) => {
 
     //#region Helper Functions
     const saveData = async (saveData, newKey) => {
+        if ('imageRef' in saveData) {
+            delete saveData.imageRef
+        }
+        if ('imgRef' in saveData) {
+            delete saveData.imgRef
+        }
         const dataToSave = JSON.stringify(saveData)
         if (newKey || newKey === '') {
             const encrypted = newKey === '' ? dataToSave : await encryptWithHashedKey(newKey, dataToSave)
@@ -82,6 +90,31 @@ export const AppContextProvider = ({ children }) => {
             const saved = await window.electron.saveFile('config.json', encrypted)
         }
         
+        console.log('File saved')
+    }
+
+    const loadDataUnencrypted = async (fileName) => {
+        const response = await window.electron.loadFile(`${fileName}.json`)
+        if (response) {
+            try {
+                setData(JSON.parse(response ?? {}))
+                setUpdate(prev => prev + 1)
+            } catch (err) {
+                // failed to parse the JSON - issue w/ file 
+            }
+            
+        } else {
+
+        }
+
+        setUpdate(1)
+    }
+
+    const saveDataUnencrypted = async (saveData, fileName) => {
+        if (fileName == 'config') return
+
+        const dataToSave = JSON.stringify(saveData)
+        const saved = await window.electron.saveFile(`${fileName}.json`, dataToSave)
         console.log('File saved')
     }
 
@@ -102,10 +135,24 @@ export const AppContextProvider = ({ children }) => {
 
     const loadData = async () => {
         const response = await window.electron.loadFile('config.json')
+
+        let imgRef = undefined
+        try {
+            const response = await window.electron.loadFile('tokenRef.json')
+            if (response) {
+                imgRef = JSON.parse(response ?? {})
+            }
+        } catch {
+            console.log('No tokenRef file found')
+        }
+
         if (response) {
             try {
                 const decryptedResponse = key ? await decryptWithHashedKey(key, response) : response
-                setData(JSON.parse(decryptedResponse ?? {}))
+                setData({
+                    ...JSON.parse(decryptedResponse ?? {})
+                    , imageRef: imgRef ?? {}
+                })
                 setUpdate(prev => prev + 1)
             } catch (err) {
                 // failed to parse the JSON - issue w/ file 
@@ -129,6 +176,9 @@ export const AppContextProvider = ({ children }) => {
             const response = await fetchTokenList(pulsechainTokens);
 
             if (response) {
+                saveDataUnencrypted(response, 'tokenRef')
+                setTokenref(response)
+
                 setData(prev => {        
                     const newData = {...prev, imageRef: response}
                     saveData(newData)
@@ -324,6 +374,23 @@ export const AppContextProvider = ({ children }) => {
         setUpdate(prev => prev + 1)
     };
 
+    const updateAliases = (key, alias) => {
+        setData(prev => {
+            const newData = {...prev, aliases: {
+                ...(prev?.aliases ?? {}),
+                [key]: alias ?? ''
+            }}
+
+            if (alias == '') {
+                delete newData.aliases[key]
+            }
+
+            saveData(newData)
+            return newData
+        })
+        setUpdate(prev => prev + 1)
+    }
+
     return (
         <AppContext.Provider value={{ 
             data, 
@@ -341,7 +408,8 @@ export const AppContextProvider = ({ children }) => {
             updateSettings, 
             saveNewKey,
             resetSingleSetting,
-            toggleCommunityDapp
+            toggleCommunityDapp,
+            updateAliases
         }}>
             {children}
         </AppContext.Provider>
@@ -371,14 +439,18 @@ export function useAppContext() {
         if (defaultImage) return defaultImage
         
         if (!settings?.config?.tokenImagesEnabled) return ImgQuestion
-        if (!Array.isArray(context?.data?.imageRef)) return ImgQuestion
+
+        if (!Array.isArray(context?.data?.imageRef) && !Array.isArray(tokenref)) return ImgQuestion
     
         try {
-          const token = context.data.imageRef.find(f => f.address.toLowerCase() == address.toLocaleLowerCase())
+          const token = (context?.data?.imageRef || []).find(f => f.address.toLowerCase() == address.toLocaleLowerCase())
+          const fallback = (tokenref || []).find(f => f.address.toLowerCase() == address.toLowerCase())
+
+          const tokenUrl = token?.url ?? fallback?.logoURI
     
-          if (!token?.url) return ImgQuestion
+          if (!tokenUrl) return ImgQuestion
     
-          return token?.url
+          return tokenUrl
         } catch {
           return ImgQuestion // undefined
         }
@@ -390,12 +462,13 @@ export function useAppContext() {
         const defaultInfo = defaultTokenInformation?.[address.toLowerCase()]    
         if (defaultInfo) return defaultInfo
         
-        if (!Array.isArray(context?.data?.imageRef)) return undefined
+        if (!Array.isArray(context?.data?.imageRef) && !Array.isArray(tokenref)) return undefined
     
         try {
-          const token = context.data.imageRef.find(f => f.address.toLowerCase() == address.toLowerCase())
+          const token = (context?.data?.imageRef || []).find(f => f.address.toLowerCase() == address.toLowerCase())
+          const fallback = (tokenref || []).find(f => f.address.toLowerCase() == address.toLowerCase())
             
-          return token
+          return token ?? fallback
         } catch {
           return 
         }

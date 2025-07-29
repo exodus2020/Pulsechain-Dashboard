@@ -13,6 +13,24 @@ const LockWrapper = styled.div`
     position: absolute; left: 50%; top: 35%;
     transform: translateX(-50%) translateY(-50%);
     text-align: center;
+    transition: all 0.3s ease;
+
+    .lock-header {
+        padding: 30px;
+        font-size: 50px;
+        position: relative;
+    }
+
+    @media (max-width: 600px) {
+        .lock-header {
+            font-size: 30px;
+        }
+    }
+    @media (max-width: 400px) {
+        left: 50%;
+        top: 220px;
+        transform: translateX(-50%) translateY(-50%);
+    }
 `
 
 const SubText = styled.div`
@@ -46,15 +64,37 @@ export default function LockPage () {
         }
     }
 
+    const handleFileSelect = async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        try {
+            const text = await file.text();
+            await window.electron.saveFile('config.json', text)
+            window.location.reload()
+        } catch (error) {
+            console.error('Error reading file:', error);
+            onFileContent(null);
+        }
+    }
+
     useEffect(() => {
         testLoadData()
     }, [])
 
     return <LockWrapper>
-        <div style={{ padding: 30, fontSize: 50}}>
-            PulseChain Dashboard
+        <div className="lock-header" >
+            <div style={{ position: 'absolute', top: -20, left: 10, transform: 'translateY(-50%) translateX(-50%)' }}>
+                {/* <img src="/logo128x128.png" alt="PulseChain Dashboard" width={64} height={64}/> */}
+                <div style={{ paddingLeft: 40, width: 600 }}>
+                    PulseChain Dashboard
+                    <div style={{ fontSize: 26 }}>
+                        Privacy-First Portfolio Tracker
+                    </div>
+                </div>
+            </div>
         </div>
-        <SubText>
+        <SubText >
             {isNewUser === undefined 
                 ? <div><div style={{ display: 'inline-block'}}><LoadingWave speed={150} numDots={8} /></div></div> 
             : isNewUser ? <div style={{ width: 300 }}>
@@ -75,10 +115,21 @@ export default function LockPage () {
                         setKey(hashedKey) 
                     }}/>
                 </div>
+                <div style={{ position: 'absolute', bottom: -30, left: '50%', transform: 'translateX(-50%)', textAlign: 'center', cursor: 'pointer', fontSize: 14 }} className="tl">
+                    {/* Import from File */}
+                    <label style={{ cursor: 'pointer' }}  className="tl">
+                        Import from File
+                    <input
+                        type="file"
+                        onChange={handleFileSelect}
+                        style={{ display: 'none' }}
+                    />
+                    </label>
+                </div>
             </div>
             : <div style={{ width: 300 }}>
                 <div style={{ marginBottom: 10 }} >
-                    Enter password to continue
+                    Enter password to login
                 </div>
                 <div>
                     <Input type="password" placeholder="Enter password" buttonText="Submit" clearOnSubmit={true} onSubmit={async (pass) => {
@@ -90,6 +141,13 @@ export default function LockPage () {
                     }}/>
                 </div>
             </div>}
+
+            <div style={{ position: 'absolute', bottom: -120, textAlign: 'center', width: '100%', fontSize: 14 }}>
+                Download for PC & MacOS<br/>
+                <a href="https://gitlab.com/pulsechain-lunagray/pulsechain-dashboard" target="_blank" style={{ color: 'white', marginTop: 10, display: 'inline-block'}}>
+                    Open-Source Repository & Downloads
+                </a>
+            </div>
         </SubText>
     </LockWrapper>
 }

@@ -9,8 +9,21 @@ import { shortenString } from "../../lib/string";
 import styled from "styled-components";
 import Tooltip from "../../shared/Tooltip";
 
-const FarmListItemWrapper = styled.div`
+const background = 'linear-gradient(to bottom, rgba(50, 50, 50, 0.3), rgba(50, 50, 50, 0.1))'
 
+const FarmListItemWrapper = styled.div`
+    .lp-info-grid {
+        display: grid;
+        grid-template-columns: 110px 85px 1fr;
+    }
+    
+    @media (max-width: 650px) {
+        .lp-info-grid {
+            grid-template-columns: 85px 100px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+    }
 `
 
 export default memo(SingleLPButton)
@@ -37,6 +50,7 @@ function SingleLPButton ({ poolData, addressData, prices, getImage, priceArray }
                 marginTop: 5,
                 padding: '15px 25px',
                 position: 'relative',
+                background: background
             } : {
                 marginTop: 5,
                 padding: '15px 25px',
@@ -62,7 +76,7 @@ function SingleLPButton ({ poolData, addressData, prices, getImage, priceArray }
                     </div>
                 </div>
                 <div>
-                    <div style={{ fontSize: 18, width: 325 }}>
+                    <div style={{ fontSize: 18, width: 325 }} className="price-name">
                         {token0display} - {token1display}
                     </div>
                     <div
@@ -76,7 +90,7 @@ function SingleLPButton ({ poolData, addressData, prices, getImage, priceArray }
                         className="mute"
                     >
                         {/* pair symbols • PLP */}
-                        <div style={{ letterSpacing: 1, display: 'grid', gridTemplateColumns: '110px 85px 1fr'}}>
+                        <div className="lp-info-grid">
                             <Tooltip content={token0display}>
                                 <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis'}}>
                                     {token0display}
@@ -86,7 +100,7 @@ function SingleLPButton ({ poolData, addressData, prices, getImage, priceArray }
                                 {priceInfo0 ? fUnit(parseFloat(addressData?.token0?.normalized ?? '0'), 2 )
                                     : 'Unknown'}
                             </div>
-                            <div>
+                            <div className="desktop-only">
                                 {priceInfo0 ? '$ ' + fUnit(parseFloat(addressData?.token0?.usd ?? '0'), 2)
                                     : 'Click to Update'}
                             </div>
@@ -100,7 +114,7 @@ function SingleLPButton ({ poolData, addressData, prices, getImage, priceArray }
                                 {priceInfo1 ? fUnit(parseFloat(addressData?.token1?.normalized ?? '0'), 2 )
                                     : 'Unknown'}
                             </div>
-                            <div>
+                            <div className="desktop-only">
                                 {priceInfo1 ? '$ ' + fUnit(parseFloat(addressData?.token1?.usd ?? '0'), 2)
                                     : 'Click to Update'}
                             </div>
@@ -122,7 +136,7 @@ function SingleLPButton ({ poolData, addressData, prices, getImage, priceArray }
                         }}
                     >
                         <span style={{ color: 'rgb(200,200,200)' }}>$</span>{' '}
-                        <span style={{ fontFamily: "'Oswald', sans-serif"}}>
+                        <span style={{ fontFamily: "'Oswald', sans-serif"}} className="price-balance">
                             {addCommasToNumber(parseFloat(totalUsd).toFixed(2)) || '-'}
                         </span>
                     </div>

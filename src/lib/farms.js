@@ -4,7 +4,15 @@ import Web3 from 'web3'
 
 export const fetchPoolInfo = async (settings = defaultSettings) => {
     try {
-        const web3 = new Web3(settings.rpcs.mainnet[0])
+        return _fetchPoolInfo(settings?.rpcs?.mainnet?.[0] || 'https://rpc.pulsechain.com')
+    } catch {
+        const provider = 'https://rpc.pulsechain.com'
+        return _fetchPoolInfo(provider)
+    }
+}
+const _fetchPoolInfo = async (provider) => {
+    try {
+        const web3 = new Web3(provider || 'https://rpc.pulsechain.com')
         const poolContract = new web3.eth.Contract(poolsAbi, poolsAddress)
         
         // Get pool length first
@@ -146,6 +154,14 @@ export const fetchPoolInfo = async (settings = defaultSettings) => {
 }
 
 export const fetchFarmBalances = async (walletAddresses, poolLength, settings = defaultSettings) => {
+    try {
+        return _fetchFarmBalances(walletAddresses, poolLength, settings, settings?.rpcs?.mainnet?.[0] || 'https://rpc.pulsechain.com')
+    } catch {
+        const provider = 'https://rpc.pulsechain.com'
+        return _fetchFarmBalances(walletAddresses, poolLength, settings, provider)
+    }
+}
+const _fetchFarmBalances = async (walletAddresses, poolLength, settings = defaultSettings, provider) => {
     try {
         const web3 = new Web3(settings.rpcs.mainnet[0])
         const poolContract = new web3.eth.Contract(poolsAbi, poolsAddress)

@@ -1,13 +1,18 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { fetchLPHistory, fetchMoreLPHistory, fetchLatestLPHistory } from '../lib/web3'
+import { fetchLPHistory, fetchMoreLPHistory, fetchLatestLPHistory, fetchLPHistoryKeyPoints } from '../lib/web3'
 import { PULSECHAIN_FIRST_BLOCK } from '../lib/web3'
 import { ethers } from 'ethers'
 import { defaultSettings } from '../config/settings'
+import { appSettingsAtom } from '../store'
+import { useAtom } from 'jotai'
 
 export default function useHistory({ priceData }) {
     const [history, setHistory] = useState({})
+    const [chartKeyPoints, setChartKeyPoints] = useState({})
     const [reserves, setReserves] = useState({})
     const isLoading = useRef(false)
+    const isLoadingChart = useRef([])
+    const [isFetchingFullHistory, setIsFetchingFullHistory] = useState(false)
     const isError = useRef(false)
     const [progress, setProgress] = useState({
         processed: 0,
@@ -17,6 +22,8 @@ export default function useHistory({ priceData }) {
         end: null,
         init: false
     })
+
+    const [settings] = useAtom(appSettingsAtom)
 
     const { prices } = priceData
     const bestStable = priceData?.bestStable
@@ -30,7 +37,7 @@ export default function useHistory({ priceData }) {
 
     const [ init, setInit ] = useState(false)
     const initializing = useRef(false)
-    const interval = useRef(null)
+    const [batchFetching, setBatchFetching] = useState(false)
     const historyRef = useRef(history) // Add ref to track latest history
 
     const resetHistory = () => {
@@ -58,14 +65,14 @@ export default function useHistory({ priceData }) {
                 initializing.current = true
 
                 const bestStableAddress = bestStable?.pair ?? '0xe56043671df55de5cdf8459710433c10324de0ae'
-                const bestStableInverse = bestStable?.invert ? true : false
+                
 
                 try {
                     const results = await Promise.allSettled([
-                        getHistory(bestStableAddress, false), // DAI, USDC, USDT
-                        getHistory('0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9', false), // PLSX
-                        getHistory('0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa', false), // INC
-                        getHistory('0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65', false) // HEX
+                        getHistory(bestStableAddress, false, settings), // DAI, USDC, USDT
+                        getHistory('0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9', false, settings), // PLSX
+                        getHistory('0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa', false, settings), // INC
+                        getHistory('0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65', false, settings) // HEX
                     ])
 
                     const parsedHistory = results.reduce((acc, i) => {
@@ -76,15 +83,16 @@ export default function useHistory({ priceData }) {
                         acc = { ...acc, [i.value.address]: i.value.history }
                         return acc
                     }, {})
-                    setHistory(parsedHistory)
+                    // setHistory(parsedHistory)
+                    setChartKeyPoints(parsedHistory)
                     setReserves(parsedReserves)
                 } catch (error) {
                     console.error('Error in getInitialData, attempting again')
                     try {
-                        getHistory(bestStableAddress, true).then(() => { //WPLS-DAI
-                            getHistory('0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9').then(() => { // WPLS-PLSX
-                                getHistory('0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa').then(() => { // WPLS-Incentive
-                                    getHistory('0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65').then(() => { // WPLS-HEX
+                        getHistory(bestStableAddress, true, settings).then(() => { //WPLS-DAI
+                            getHistory('0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9', true, settings).then(() => { // WPLS-PLSX
+                                getHistory('0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa', true, settings).then(() => { // WPLS-Incentive
+                                    getHistory('0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65', true, settings).then(() => { // WPLS-HEX
                                         setInit(true)
                                     })
                                 })
@@ -95,7 +103,14 @@ export default function useHistory({ priceData }) {
                     }
                 } finally {
                     initializing.current = false
+                    batchFetchHistory()
                     setInit(true)
+                }
+
+                try {
+                    getChartHistory(bestStableAddress, true, settings)
+                } catch (error) {
+                    console.error('failed to retrieve best stable')
                 }
             }
             getInitialData()
@@ -104,20 +119,71 @@ export default function useHistory({ priceData }) {
 
             if (!history?.[bestStableAddress]) {
                 console.log('stable switched')
-                getHistory(bestStableAddress, true)
+                getChartHistory(bestStableAddress, true, settings)
             }
         }
     }, [priceData.bestStable, Object.keys(prices).length, priceData.bestStableUpdated, init])
 
-    const getHistory = useCallback(async (lpAddress, saveToState = true) => {
-        if (saveToState && (!lpAddress || isLoading.current || history[lpAddress])) return false
+    const batchFetchHistory = async () => {
+        if (batchFetching) return
+        setBatchFetching(true)
+
+        try {
+            const results = await Promise.allSettled([
+                getHistory('0xae8429918fdbf9a5867e3243697637dc56aa76a1', false, settings),
+                getHistory('0xe0e1f83a1c64cf65c1a86d7f3445fc4f58f7dcbf', false, settings),
+                getHistory('0x42abdfdb63f3282033c766e72cc4810738571609', false, settings) 
+            ])
+
+            const parsedHistory = results.reduce((acc, i) => {
+                acc = { ...acc, [i.value.address]: i.value.history }
+                return acc
+            }, {})
+            const parsedReserves = results.reduce((acc, i) => {
+                acc = { ...acc, [i.value.address]: i.value.history }
+                return acc
+            }, {})
+
+            // setHistory(prev => ({ ...prev, ...parsedHistory }))
+            setChartKeyPoints(prev => ({ ...prev, ...parsedHistory }))
+            setReserves(prev => ({ ...prev, ...parsedReserves }))
+        } catch (error) {
+            console.error('Error in getInitialData, attempting again')
+            try {
+                getHistory('0xae8429918fdbf9a5867e3243697637dc56aa76a1', true, settings).then(() => { 
+                    getHistory('0xe0e1f83a1c64cf65c1a86d7f3445fc4f58f7dcbf', true, settings).then(() => { 
+                        getHistory('0x42abdfdb63f3282033c766e72cc4810738571609', true, settings).then(() => { 
+                            
+                        })
+                    })
+                })
+            } catch (error) {
+                console.error('Error in getInitialData')
+            }
+        } finally {
+            setBatchFetching(false)
+        }
+    }
+
+    const getHistory = useCallback(async (lpAddress, saveToState = true, settings = defaultSettings) => {
+        if (saveToState && (!lpAddress || isLoading.current || chartKeyPoints?.[lpAddress])) return false
 
         try {
             isLoading.current = true
             isError.current = false
 
-            const provider = new ethers.providers.JsonRpcProvider(defaultSettings.rpcs.mainnet[0])
-            const currentBlock = await provider.getBlockNumber()
+            let provider = new ethers.providers.JsonRpcProvider(settings.rpcs.mainnet[0])
+            let currentBlock;
+            try {
+                currentBlock = await provider.getBlockNumber()
+            } catch {
+                provider = new ethers.providers.JsonRpcProvider('https://rpc.pulsechain.com')
+                currentBlock = await provider.getBlockNumber()
+            }
+            
+            if (!currentBlock) {
+                return false
+            }
             const startBlock = Math.max(
                 currentBlock - BLOCKS_TO_FETCH,
                 PULSECHAIN_FIRST_BLOCK
@@ -135,13 +201,13 @@ export default function useHistory({ priceData }) {
                 currentPriceInverted,
                 endingReserve0,
                 endingReserve1
-            } = await fetchLPHistory(
+            } = await fetchLPHistoryKeyPoints(
                 lpAddress,
                 startBlock,
                 currentBlock,
                 CHUNK_SIZE,
                 'mainnet',
-                defaultSettings,
+                settings,
                 tokenInfo
             )
             
@@ -207,7 +273,7 @@ export default function useHistory({ priceData }) {
                 }
             }
 
-            setHistory(prev => ({
+            setChartKeyPoints(prev => ({
                 ...prev,
                 [lpAddress]: sortedHistory
             }))
@@ -231,19 +297,182 @@ export default function useHistory({ priceData }) {
         }
     }, [prices])
 
-    const fetchMore = useCallback(async (lpAddress) => {
+    const getChartHistory = useCallback(async (lpAddress, saveToState = true, settings = defaultSettings) => {
+        const loadingChart = isLoadingChart.current.find(f => f === lpAddress?.toLowerCase()) ? true : false
+
+        if (isFetchingFullHistory) return false
+        if (saveToState && (!lpAddress || loadingChart || history[lpAddress])) return false
+        if (loadingChart) {
+            isLoadingChart.current.push(lpAddress?.toLowerCase())
+        }
+        setIsFetchingFullHistory(true)
+
+        try {
+            isLoading.current = true
+            isError.current = false
+
+            let provider = new ethers.providers.JsonRpcProvider(settings.rpcs.mainnet[0])
+            let currentBlock;
+            try {
+                currentBlock = await provider.getBlockNumber()
+            } catch {
+                provider = new ethers.providers.JsonRpcProvider('https://rpc.pulsechain.com')
+                currentBlock = await provider.getBlockNumber()
+            }
+            
+            if (!currentBlock) {
+                return false
+            }
+            const startBlock = Math.max(
+                currentBlock - BLOCKS_TO_FETCH,
+                PULSECHAIN_FIRST_BLOCK
+            )
+
+            const start = new Date().getTime()
+            setProgress({ ...progress, start, end: null, status: `fetching ${lpAddress}` })
+
+            const tokenAddress = Object.keys(prices).find(f => prices[f].pairId === lpAddress)
+            const tokenInfo = prices[tokenAddress]
+
+            const { 
+                events, 
+                currentPrice, 
+                currentPriceInverted,
+                endingReserve0,
+                endingReserve1
+            } = await fetchLPHistory(
+                lpAddress,
+                startBlock,
+                currentBlock,
+                CHUNK_SIZE,
+                'mainnet',
+                settings,
+                tokenInfo
+            )
+            
+            setProgress({ ...progress, start, end: new Date().getTime() })
+
+            // Calculate current time and work backwards
+            const currentTime = new Date().getTime()
+
+            // Group prices by hourly blocks
+            const priceHistory = {}
+            events.forEach(event => {
+                const hourlyBlock = Math.floor(event.blockNumber / BLOCKS_PER_HOUR) * BLOCKS_PER_HOUR
+                const blockDiff = currentBlock - event.blockNumber
+                const timestamp = currentTime - (blockDiff * SECONDS_PER_BLOCK * 1000)
+
+                if (!priceHistory[hourlyBlock]) {
+                    priceHistory[hourlyBlock] = {
+                        lastPrice: event.price,
+                        lastPriceInverted: event.priceInverted,
+                        blockNumber: hourlyBlock,
+                        timestamp: timestamp
+                    }
+                } else {
+                    // Update only if this event is more recent in the hour
+                    if (event.blockNumber > priceHistory[hourlyBlock].blockNumber) {
+                        priceHistory[hourlyBlock] = {
+                            lastPrice: event.price,
+                            lastPriceInverted: event.priceInverted,
+                            blockNumber: hourlyBlock,
+                            timestamp: timestamp
+                        }
+                    }
+                }
+            })
+
+            // Convert to array format with same structure as before
+            const hourlyHistory = Object.entries(priceHistory).map(([blockNumber, data]) => ({
+                blockNumber: Number(blockNumber),
+                timestamp: data.timestamp,
+                price: data.lastPrice,
+                priceInverted: data.lastPriceInverted
+            }))
+
+            const sortedHistory = hourlyHistory.sort((a, b) => a.blockNumber - b.blockNumber)
+            
+            // Update the last entry with current price and time
+            sortedHistory[sortedHistory.length - 1] = {
+                ...sortedHistory[sortedHistory.length - 1],
+                price: currentPrice,
+                priceInverted: currentPriceInverted,
+                timestamp: currentTime
+            }
+
+            if (!saveToState) {
+                isLoading.current = false
+                getHistory(lpAddress, true, settings)
+                return {
+                    address: lpAddress,
+                    history: sortedHistory,
+                    reserves: {
+                        reserve0: endingReserve0,
+                        reserve1: endingReserve1
+                    }
+                }
+            }
+
+            setHistory(prev => ({
+                ...prev,
+                [lpAddress]: sortedHistory
+            }))
+
+            // Store reserves for this LP
+            setReserves(prev => ({
+                ...prev,
+                [lpAddress]: {
+                    reserve0: endingReserve0,
+                    reserve1: endingReserve1
+                }
+            }))
+
+            isLoading.current = false
+            setIsFetchingFullHistory(false)
+
+            getHistory(lpAddress, true, settings)
+            return true
+
+        } catch (error) {
+            console.error('Error in getHistory:', error)
+            isError.current = true
+            setIsFetchingFullHistory(false)
+            return false
+        }
+    }, [prices])
+
+    const fetchMore = async(lpAddress, settings = defaultSettings) => {
+        try {
+            return await _fetchMore(lpAddress, settings?.rpcs?.mainnet?.[0] || "https://rpc.pulsechain.com")
+        } catch {
+            return await _fetchMore(lpAddress, "https://rpc.pulsechain.com")
+        }
+        
+    }
+    
+    const _fetchMore = useCallback(async (lpAddress, providerURL) => {
         if (!lpAddress || isLoading.current || !reserves[lpAddress]) return
         
         try {
             isLoading.current = true
             isError.current = false
 
-            const provider = new ethers.providers.JsonRpcProvider(defaultSettings.rpcs.mainnet[0])
-            const currentBlock = await provider.getBlockNumber()
+            let provider = new ethers.providers.JsonRpcProvider(providerURL)
+            let currentBlock;
+            try {
+                currentBlock = await provider.getBlockNumber()
+            } catch {
+                provider = new ethers.providers.JsonRpcProvider('https://rpc.pulsechain.com')
+                currentBlock = await provider.getBlockNumber()
+            }
+
+            if (!currentBlock) {
+                return false
+            }
 
             // If no history exists, just run getHistory
             if (!history[lpAddress]) {
-                return getHistory(lpAddress)
+                return getHistory(lpAddress, true, settings)
             }
 
             // Get the oldest block we have
@@ -282,7 +511,7 @@ export default function useHistory({ priceData }) {
                 reserves[lpAddress].reserve1,
                 CHUNK_SIZE,
                 'mainnet',
-                defaultSettings,
+                settings,
                 tokenInfo
             )
 
@@ -351,8 +580,19 @@ export default function useHistory({ priceData }) {
         if (!lpAddress || isLoading.current || !history[lpAddress]) return
         
         try {
-            const provider = new ethers.providers.JsonRpcProvider(defaultSettings.rpcs.mainnet[0])
-            const currentBlock = await provider.getBlockNumber()
+            let provider = new ethers.providers.JsonRpcProvider(settings.rpcs.mainnet[0])
+            let currentBlock;
+            try {
+                currentBlock = await provider.getBlockNumber()
+            } catch {
+                provider = new ethers.providers.JsonRpcProvider('https://rpc.pulsechain.com')
+                currentBlock = await provider.getBlockNumber()
+            }
+
+            if (!currentBlock) {
+                return false
+            }
+
             const currentHourBlock = Math.floor(currentBlock / BLOCKS_PER_HOUR) * BLOCKS_PER_HOUR
 
             const tokenAddress = Object.keys(prices).find(f => prices[f].pairId === lpAddress)
@@ -369,7 +609,7 @@ export default function useHistory({ priceData }) {
                 currentBlock,
                 CHUNK_SIZE,
                 'mainnet',
-                defaultSettings,
+                settings,
                 tokenInfo
             )
 
@@ -425,31 +665,33 @@ export default function useHistory({ priceData }) {
         }
     }, [history, prices])
 
-    useEffect(() => {
-        if (init && !interval.current) {
-            interval.current = setInterval(() => {
+    //useEffect(() => {
+        // if (init && !interval.current) {
+        //     interval.current = setInterval(() => {
                
-                Object.keys(historyRef.current).forEach(lpAddress => {
-                    updateLatestHistory(lpAddress)
-                })
-            }, 60000)
+        //         Object.keys(historyRef.current).forEach(lpAddress => {
+        //             updateLatestHistory(lpAddress)
+        //         })
+        //     }, 60000)
 
-            return () => {
-                if (interval.current) {
-                    clearInterval(interval.current)
-                    interval.current = null
-                }
-            }
-        }
-    }, [init, updateLatestHistory]) // Remove history dependency
+        //     return () => {
+        //         if (interval.current) {
+        //             clearInterval(interval.current)
+        //             interval.current = null
+        //         }
+        //     }
+        // }
+    //}, [init, updateLatestHistory]) // Remove history dependency
 
     return {
         history,
+        chartKeyPoints,
         getHistory,
+        getChartHistory,
         fetchMore,
-        isLoading: isLoading.current,
+        isLoading: isFetchingFullHistory || isLoading.current, //isLoading.current,
         isError: isError.current,
         progress,
-        resetHistory
+        resetHistory        
     }
 } 

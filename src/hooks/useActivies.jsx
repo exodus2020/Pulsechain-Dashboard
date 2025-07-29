@@ -2,13 +2,13 @@ import { useEffect, useState } from "react"
 import { batchFetchActivities } from "../lib/web3"
 
 
-export default function useActivities (wallets = []) {
+export default function useActivities (wallets = [], network = 'mainnet', settings = defaultSettings) {
     const [ activities, setActivities ] = useState({})
     const [ loading, setLoading ] = useState(false)
 
     useEffect(() => {
         const getActivities = async () => {
-            const response = await batchFetchActivities(wallets)
+            const response = await batchFetchActivities(wallets, network, settings)
 
             setActivities(response)
             setLoading(false)

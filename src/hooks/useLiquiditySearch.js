@@ -90,7 +90,7 @@ export default function useLiquiditySearch({ searchTerm, wallets, lpAddresses = 
                 }
 
                 // Query the LP contract
-                const lpData = await batchQueryLPs([cleanedAddress], 'mainnet', defaultSettings)
+                const lpData = await batchQueryLPs([cleanedAddress], 'mainnet', settings)
                 
                 if (!lpData || !lpData[cleanedAddress]) {
                     setNoResults(true)

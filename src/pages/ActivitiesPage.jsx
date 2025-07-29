@@ -64,11 +64,11 @@ function PageCheck (props) {
         </Wrapper>
     }
 
-    return <ActivitiesPage {...props} />
+    return <ActivitiesPage {...props} settings={settings} />
 }
 
 
-function ActivitiesPage ({priceData, balanceData, farmData}) {
+function ActivitiesPage ({priceData, balanceData, farmData, settings}) {
     const { pricePairs, prices, priceLastUpdated } = priceData
     const { balances, combinedBalances } = balanceData
 
@@ -82,7 +82,7 @@ function ActivitiesPage ({priceData, balanceData, farmData}) {
     const priceArray = Object.keys(prices)
     const pricesLoaded = priceArray.length > 0
 
-    const { activities, loading } = useActivities(wallets)
+    const { activities, loading } = useActivities(wallets, 'mainnet', settings)
     const [ filterFork, setFilterFork ] = useState(true)
 
     const [ filterWallet, setFilterWallet ] = useState('All')

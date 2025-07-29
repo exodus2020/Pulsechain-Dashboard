@@ -91,7 +91,7 @@ export default function useGetBalance(priceData) {
     useEffect(() => {
         if (!readyForFirstUpdate) return
         
-        const interval = setInterval(fetchBalances, 30_000)
+        const interval = setInterval(fetchBalances, 60_000 * 1) // update every 1 minute
         return () => clearInterval(interval)
     }, [readyForFirstUpdate, fetchBalances])
 

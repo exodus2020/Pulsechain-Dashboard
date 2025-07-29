@@ -1,6 +1,20 @@
 # PulseChain Dashboard - Privacy-First PulseChain Dashboard
 
-PulseChain Dashboard is an open-source desktop application that enables users to track their PulseChain portfolio and interact with the PulseChain ecosystem without the need to rely on a centralized service or entity. Built with privacy in mind, all data is stored and encrypted locally. All official dApps pull from the official PulseChain repos and allow users to easily run them from a single location.
+## Download the Latest Release (Precompiled Binaries)
+ - Windows: [Latest Release (exe)](https://drive.proton.me/urls/W2YY5AR9A8#loVY3QQN3JyZ)
+ - MacOS (arm64): [Latest Release (zip)](https://drive.proton.me/urls/E9W0RQ7BMG#WFrtnCIQTeq0)
+ - MacOS (x64): [Latest Release (zip)](https://drive.proton.me/urls/0N1S5HEXQG#2qy8JxcqnvL7)
+
+Note: These binaries are not signed.
+ - On Windows, you may get a security popup. Click More Info -> Run Anyway.
+ - On MacOS, uncompress the zip and run the ./run-app.sh file (instructions included in README.txt)
+ - If you prefer to compile the app on your own, instructions are down below. All code is open-source.
+
+Some users may also prefer the web version: [https://plsdashboard.link](https://plsdashboard.link/)
+
+## What is the PulseChain Dashboard?
+
+PulseChain Dashboard is an open-source software application that enables users to track their PulseChain portfolio and interact with the PulseChain ecosystem without the need to rely on a centralized service or entity. Built with privacy in mind, all data is stored and encrypted locally. All official PusleChain apps (PulseX, HEX, Bridge, Explorer) can be downloaded, updated or ran from the official sources within the PulseChain Dashboard with a single click.
 
 ## Features
 
@@ -12,16 +26,13 @@ PulseChain Dashboard is an open-source desktop application that enables users to
 - Privacy-focused design
 - Real-time price updates and INC rewards
 - Customizable RPC endpoints
+- HEX stake tracking, management, and stats
+- Import/Export encrypted portfolios with ease for storage or usage on other devices
 
-
-## Latest Release (Precompiled Binaries)
- - Windows: [Latest Release (exe)](https://drive.proton.me/urls/1CYZE0N5NG#6L69iqAONhTi)
- - MacOS (arm64): [Latest Release (zip)](https://drive.proton.me/urls/FWZ18FK220#6EgzyrkDGuKR)
- - MacOS (x64): [Latest Release (zip)](https://drive.proton.me/urls/8DX35F0J1G#6H72oWbgAR57)
-
-Note: These binaries are not signed.
- - On Windows, you may get a security popup. Click More Info -> Run Anyway.
- - On MacOS, uncompress the zip and run the ./run-app.sh file (instructions included in README.txt)
+## Previous Versions
+ - Windows: [1.1 (exe)](https://drive.proton.me/urls/1CYZE0N5NG#6L69iqAONhTi)
+ - MacOS (arm64): [1.1 (zip)](https://drive.proton.me/urls/FWZ18FK220#6EgzyrkDGuKR)
+ - MacOS (x64): [1.1 (zip)](https://drive.proton.me/urls/8DX35F0J1G#6H72oWbgAR57)
 
 ## Building from Source
 

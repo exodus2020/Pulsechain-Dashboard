@@ -11,7 +11,7 @@ const ButtonWrapper = styled.div`
       display: flex;
       align-items: center;
       justify-content: ${props => props.textalign === 'center' ? 'center' : 'flex-start'};
-      background-color: rgb(30,30,30);
+      background: rgb(30,30,30);
       color: white;
       border: none;
       padding: 8px 16px;
@@ -23,8 +23,9 @@ const ButtonWrapper = styled.div`
       margin-top: 0px;
 
       &:hover {
-          box-shadow: inset 0px 0px 1px 1px white;
+          box-shadow: inset 0px 0px 1px 1px white !important;
           transform: scale(1);
+          background: rgb(30,30,30) !important;
       }
   }
 

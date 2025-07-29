@@ -11,8 +11,22 @@ import Icon from "../Icon";
 import { icons_list } from "../../config/icons";
 import Tooltip from "../../shared/Tooltip";
 
-const FarmListItemWrapper = styled.div`
+const background = 'linear-gradient(to bottom, rgba(50, 50, 50, 0.3), rgba(50, 50, 50, 0.1))'
 
+const FarmListItemWrapper = styled.div`
+    .farm-info-grid {
+        display: grid;
+        grid-template-columns: 110px 85px 1fr;
+    }
+    @media (max-width: 650px) {
+        .farm-info-grid {
+            grid-template-columns: 85px 100px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+    }
+    
+    
 `
 
 export default memo(SingleFarmButton)
@@ -41,6 +55,7 @@ function SingleFarmButton ({ poolData, addressData, prices, getImage, priceArray
                 marginTop: 5,
                 padding: '15px 25px',
                 position: 'relative',
+                background: background
             }}
             onClick={() => {
                 setLiquidityPoolModal({
@@ -59,7 +74,7 @@ function SingleFarmButton ({ poolData, addressData, prices, getImage, priceArray
                 </div>
                 <div>
                     <div style={{ fontSize: 18, width: 325 }}>
-                        <Tooltip content="PulseX Farm"><span className="mute" style={{ marginRight: 5, color: 'rgb(50,200,50)' }}><Icon icon={icons_list.farm} size={20}/></span></Tooltip> {token0display} - {token1display} 
+                        <Tooltip content="PulseX Farm"><span className="mute" style={{ marginRight: 5, color: 'rgb(50,200,50)' }}><Icon icon={icons_list.farm} size={20}/></span></Tooltip><span className="price-name">{token0display} - {token1display}</span>
                     </div>
                     <div
                         style={{
@@ -72,14 +87,14 @@ function SingleFarmButton ({ poolData, addressData, prices, getImage, priceArray
                         className="mute"
                     >
                         {/* pair symbols • PLP */}
-                        <div style={{ letterSpacing: 1, display: 'grid', gridTemplateColumns: '110px 85px 1fr'}}>
+                        <div className="farm-info-grid">
                             {/* PLP {addressData?.stakedTokens ?? 0} */}
                             <div>{token0display}</div>
                             <div>
                                 {priceInfo0 ? fUnit(parseFloat(addressData?.token0?.normalized ?? '0'), 2 )
                                     : 'Unknown'}
                             </div>
-                            <div>
+                            <div className="desktop-only">
                                 {priceInfo0 ? '$ ' + fUnit(parseFloat(addressData?.token0?.usd ?? '0'), 2)
                                     : 'Click to Update'}
                             </div>
@@ -88,7 +103,7 @@ function SingleFarmButton ({ poolData, addressData, prices, getImage, priceArray
                                 {priceInfo1 ? fUnit(parseFloat(addressData?.token1?.normalized ?? '0'), 2 )
                                     : 'Unknown'}
                             </div>
-                            <div>
+                            <div className="desktop-only">
                                 {priceInfo1 ? '$ ' + fUnit(parseFloat(addressData?.token1?.usd ?? '0'), 2)
                                     : 'Click to Update'}
                             </div>
@@ -110,7 +125,7 @@ function SingleFarmButton ({ poolData, addressData, prices, getImage, priceArray
                         }}
                     >
                         <span style={{ color: 'rgb(200,200,200)' }}>$</span>{' '}
-                        <span style={{ fontFamily: "'Oswald', sans-serif"}}>
+                        <span style={{ fontFamily: "'Oswald', sans-serif"}} className="price-balance">
                             {addCommasToNumber(parseFloat(totalUsd).toFixed(2)) || '-'}
                         </span>
                     </div>
