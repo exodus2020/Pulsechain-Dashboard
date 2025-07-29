@@ -17,8 +17,8 @@ const ModalWrapper = styled.div`
   position: absolute; top: 0; left: 0; height: 100vh; width: 100vw;
   user-select: none;
   z-index: 100;
-  background: rgba(30,30,30, 0.9);
-  backdrop-filter: blur(3px);
+  background: linear-gradient(to bottom, rgba(50, 50, 50, 0.6), rgba(0, 0, 0, 0.9));
+  backdrop-filter: blur(6px);
   overflow: hidden;
 
   .close-button {

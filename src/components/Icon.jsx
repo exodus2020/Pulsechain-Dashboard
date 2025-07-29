@@ -15,10 +15,7 @@ const IconWrapper = styled.div`
 const Icon = ({ icon, size = 24, style = {} }) => {
   return (
     <IconWrapper size={size} style={style}>
-      {/* <svg height={size} width={size} viewBox={`0 0 ${size} ${size}`}> */}
-      {/* <svg> */}
         {icon}
-      {/* </svg> */}
     </IconWrapper>
   );
 };

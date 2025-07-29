@@ -253,6 +253,9 @@ export const tokenRawToNormalized = (raw, decimals) => {
 
 
 export const convertPricePairToPrice = (pricePair, decimals0 = 18, decimals1 = 18, scale = 1e18) => {
+    if (!pricePair?.reserve0 || pricePair.reserve0 == 0 || pricePair.reserve1 == 0) {
+      return NaN
+    }
     const reserve0BigInt = BigInt(pricePair.reserve0) * BigInt(10**decimals0);
     const reserve1BigInt = BigInt(pricePair.reserve1) * BigInt(10**decimals1);
 

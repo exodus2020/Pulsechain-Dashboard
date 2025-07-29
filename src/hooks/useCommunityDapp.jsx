@@ -72,7 +72,6 @@ export default function useCommunityDapp(context) {
         if (typeof url !== 'string') return null
         const response = await window.electron.getFile(url)
 
-        debugger
         if(response.name && typeof response.name === 'string' && Array.isArray(response?.dapps)) {
             try {
                 const result = {

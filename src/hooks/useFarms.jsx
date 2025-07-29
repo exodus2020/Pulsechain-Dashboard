@@ -306,7 +306,7 @@ export default function useFarms({context, priceData}) {
     useEffect(() => {
         if (Object.keys(farmBalances).length === 0) return
 
-        const interval = setInterval(updateRewards, 45_000) // Update every 45 seconds
+        const interval = setInterval(updateRewards, 60_000 * 3) // Update every 3 minutes
 
         return () => clearInterval(interval)
     }, [Object.keys(farmBalances).length])

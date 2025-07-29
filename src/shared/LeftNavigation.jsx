@@ -9,11 +9,14 @@ import version from "../config/version.json"
 import axios from "axios"
 import { useState } from "react"
 import Tooltip from "./Tooltip"
+import { fUnit } from "../lib/numbers"
+import Button from "../components/Button"
 
 const Wrapper = styled.div`
     position: relative;
     background: rgba(0, 0, 0, 1);
     background: rgba(30, 30, 30, 1);
+    background: linear-gradient(to bottom, rgba(25, 25, 25, 1), rgba(20, 20, 20, 0.8));
     height: 100%;
     color: white;
 
@@ -120,14 +123,32 @@ const Wrapper = styled.div`
             color: rgb(200,200,200);
         }
     }
+
+    .mini-button {
+        width: 24px; height: 24px;
+        border-radius: 5px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgb(30,30,30);
+        color: rgb(150,150,150);
+        cursor: pointer;
+        transition: all 0.3s ease;
+
+        &:hover {
+            background: rgb(40,40,40);
+            color: rgb(200,200,200);
+        }
+    }
 `
 
-export function LeftNavigation() {
+export function LeftNavigation({ fees, toggleMode }) {
     const [ expanded, setExpanded ] = useAtom(expandedAtom)
     const [ appPage ] = useAtom(appPageAtom)
 
     const { setModal } = useModals();
 
+    const { estimatedFees, loading, error } = fees
     const [ gitlabVersion, setGitlabVersion ] = useState(null)
 
     const handleOpenGitlab = async () => {
@@ -137,6 +158,10 @@ export function LeftNavigation() {
     const handleCheckForUpdates = async () => {
         const version = await window.electron.getFile('https://gitlab.com/pulsechain-lunagray/pulsechain-dashboard/-/raw/main/src/config/version.json?ref_type=heads')
         setGitlabVersion(version?.version ?? null)
+    }
+
+    const handleToggleMode = () => {
+        toggleMode?.()
     }
 
     return (
@@ -158,6 +183,33 @@ export function LeftNavigation() {
                             </button>
                         </div>
                     )})}
+                    {/* {expanded && <div style={{ position: 'absolute', bottom: 55, left: 5, padding: 10 }}>
+                        <div className='mini-button' onClick={handleToggleMode}>
+                            <Icon icon={icons_list['pip-in']} size={20}/>
+                        </div>
+                    </div>} */}
+                    <div style={{ position: 'absolute', bottom: 55, right: 0, padding: 10 }}>
+                        {expanded ? <div style={{ position: 'relative', color: 'rgb(150,150,150)' }}>
+                            {estimatedFees?.slow?.baseFee ? <span style={{ fontSize: 14, marginRight: 28, whiteSpace: 'nowrap' }}>
+                                {parseFloat(Math.round(estimatedFees?.slow?.baseFee / 1_000) / 1_000).toFixed(2)} mB
+                            </span> : <span style={{ fontSize: 14, marginRight: 24 }}>
+                                Estimating
+                                </span>}
+                            {<div style={{ position: 'absolute', right: 4, bottom: -4 }}>
+                                <Icon icon={icons_list['gas']} size={20}/>
+                            </div>}
+                        </div> :
+                        <div style={{ position: 'relative', color: 'rgb(150,150,150)', width: '100%', textAlign: 'center' }}>
+                            {estimatedFees?.slow?.baseFee ? <span style={{ fontSize: 10, whiteSpace: 'nowrap', marginLeft: 4 }}>
+                                {parseFloat(Math.round(estimatedFees?.slow?.baseFee / 1_000) / 1_000).toFixed(1)} mB
+                            </span> : <span style={{ fontSize: 14, marginRight: 24 }}>
+                                ...
+                                </span>}
+                            {<div style={{ position: 'absolute', right: 4, bottom: 20 }}>
+                                <Icon icon={icons_list['gas']} size={20}/>
+                            </div>}
+                        </div>}
+                    </div>
                 </div>
                 <div className="nav-footer" style={{ minHeight: 40 }}>
                     <div>

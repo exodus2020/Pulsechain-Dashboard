@@ -10,7 +10,8 @@ export const repositories = [
       repoUrl: "https://gitlab.com/pulsechaincom/pulsex-server.git",
       webUrl: 'https://app.pulsex.com',
       icon: ImgPulseX,
-      port: 9991
+      port: 9991,
+      description: "The Premier DEX on PulseChain: Swap, farm, manage liquidity."
     },
     {
       name: "PulseChain Bridge",
@@ -18,7 +19,8 @@ export const repositories = [
       repoUrl: "https://gitlab.com/pulsechaincom/pulsechain-bridge-server.git",
       webUrl: 'https://bridge.pulsechain.com',
       icon: ImgBridge,
-      port: 9992
+      port: 9992,
+      description: "Bridge your Ethereum assets to PulseChain."
     },
     {
       name: "PulseChain Explorer",
@@ -26,7 +28,8 @@ export const repositories = [
       repoUrl: "https://gitlab.com/pulsechaincom/pulsechain-explorer-server.git",
       webUrl: 'https://scan.pulsechain.com',
       icon: ImgPulse,
-      port: 9993
+      port: 9993,
+      description: "Look up transactions, addresses, tokens, and more."
     },
     {
       name: "HEX Mining",
@@ -34,7 +37,8 @@ export const repositories = [
       repoUrl: "https://gitlab.com/pulsechaincom/hex-server.git",
       webUrl: 'https://go.hex.com',
       icon: ImgHEX,
-      port: 9994
+      port: 9994,
+      description: "Create and manage HEX miners on PulseChain."
     }
 ]
 

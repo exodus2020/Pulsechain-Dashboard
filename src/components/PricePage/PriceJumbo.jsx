@@ -70,6 +70,15 @@ function PriceJumbo ({ balance = 0, wallets = {}, loading = false, isFiltered = 
 
     if (noAddresses) return <Wrapper>
         <div className="jumbo-header">
+            <div style={{ fontSize: 12, fontFamily: 'sans-serif', color: 'rgb(120,120,120)', position: 'absolute', top: 10, right: 15 }}>
+                <Tooltip content={<div style={{ textAlign: 'center' }}>
+                    All prices and percentages are approximations<br/>based off the value of {bestStable?.name ?? 'DAI'} from Ethereum</div>
+                } placement="left">
+                    <div className="info-icon">
+                        {bestStableImage ? <ImageContainer source={bestStableImage} style={{ marginRight: 15, filter: 'grayscale(.3)', padding: 0 }} size={20}/> : 'i'} 
+                    </div>
+                </Tooltip>
+            </div>
             Add an address to get started
             <div>
                 <Button parentStyle={{display: 'inline-block', marginTop: 30, width: '200px'}} textAlign={'center'} onClick={() => setWalletModal(true)}>

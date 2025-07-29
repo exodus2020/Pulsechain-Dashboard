@@ -9,7 +9,8 @@ export const defaultSettings = {
     },
     config: {
         scanEnabled: false,
-        tokenImagesEnabled: false
+        tokenImagesEnabled: false,
+        dappImagesEnabled: false
     }
 }
 

@@ -4,10 +4,12 @@ import 'typeface-raleway'
 import { expandedAtom } from '../store';
 import { useAtom } from 'jotai';
 import { useAppContext } from './AppContext';
+import { MobileHeader } from './MobileHeader';
+import ErrorMessage from '../components/ErrorMessage';
 
 const LayoutWrapper = styled.div`
   position: absolute;
-  left: 0; top: 0; height: 100vh; width: 100vw;
+  left: 0; top: 0; height: 100dvh; width: 100dvw;
   font-family: 'Oswald', sans-serif;
   overflow: hidden;
 
@@ -56,6 +58,7 @@ const LayoutWrapper = styled.div`
       box-shadow: inset 0px 0px 1px rgba(90,90,90,1);
     }
   }
+
 `;
 
 const Grid = styled.div`
@@ -65,56 +68,95 @@ const Grid = styled.div`
   width: 100vw;
   grid-template-columns: 200px 1fr;
   transition: all 1s ease;
-  &.collapsed {
-    grid-template-columns: 50px 1fr;
+  
+  @media (min-width: 650px) {
+    &.collapsed {
+      grid-template-columns: 50px 1fr;
+      .content {
+        transition: all 1s ease;
+        width: calc( 100vw - 50px);
+        display: flex;
+        justify-content: center;
+      }
+    }
+    &.expanded {
+      grid-template-columns: 200px 1fr;
+      .content {
+        transition: all 1s ease;
+        width: calc( 100vw - 200px);
+        display: flex;
+        justify-content: center;
+      }
+    }
 
-    .content {
-      width: calc( 100vw - 50px);
+    .padding {
+      padding: 50px 40px 100px 40px;
     }
   }
+
+  @media (max-width: 650px) {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    height: 100dvh;
+    width: 100dvw;
+    .padding {
+      padding: 50px 40px 100px 40px;
+    }
+
+    .left-navigation {
+      display: none;
+    }
+  }
+
+
 `
 
 const Content = styled.div`
-  // background: black;
   z-index: 0;
-  transition: all 1s ease;
-  width: calc(100vw - 199px);
+  transition: position 1s ease;
   position: absolute;
-  height: calc(100vh + 30px);
-  right: 0;
-  top: 0;
+  height: calc( 100% - 50px );
+
+  &.expanded-c {
+    left: 0px;
+  }
+
+  &.collapsed-c {
+    left: 0px;
+  }
+  
+  top: 0px;
   overflow-x: none;
   overflow-y: scroll;
-
-  // background-image: linear-gradient(to top, rgba(19, 21, 25, 0), rgb(19, 21, 25)) !important;
-
-  .padding {
-    padding: 40px 40px 100px 40px;
-    overflow-wrap: break-word;
-    // word-wrap: break-word;
-    white-space: normal;
-  }
+  position: relative;
 `;
 
-function Layout({ children }) {
+function Layout({ children, fees, toggleMode }) {
   const [ expanded, setExpanded ] = useAtom(expandedAtom)
   const { data, update, updateImageUrReference } = useAppContext()
 
   return (
     <LayoutWrapper>
-        <Grid className={expanded ? 'expanded' : 'collapsed'}>
-            <LeftNavigation />
-            {update === 0 ? <Content className="content">
+        <MobileHeader />
+        <Grid className={`${expanded ? 'expanded' : 'collapsed'}`}>
+          <div className="left-navigation">
+            <LeftNavigation fees={fees} toggleMode={toggleMode} />
+          </div>
+          {update === 0 ? <Content className="content">
+              <ErrorMessage />
               Initializing
             </Content>
-            : <Content className="content">
+            : <Content className={`content ${expanded ? 'expanded-c' : 'collapsed-c'}`}>
+              <ErrorMessage />
               <div className="padding">
                 { children }
               </div>
             </Content>
-            }
+          }
         </Grid>
-        
     </LayoutWrapper>
   )
 }

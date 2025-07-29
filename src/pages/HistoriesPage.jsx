@@ -4,6 +4,8 @@ import { useEffect, useState } from "react"
 import BasicChart from "../components/BasicChart"
 import LoadingWave from "../components/LoadingWave"
 import { calculateScaledResultForChart } from "../lib/numbers"
+import { appSettingsAtom } from "../store"
+import { useAtom } from "jotai"
 
 const Wrapper = styled.div`
     color: white;
@@ -26,7 +28,8 @@ const Wrapper = styled.div`
 `
 
 export default function HistoriesPage({ historyData }) {
-    const { history, getHistory, fetchMore, isLoading, isError, progress } = historyData
+    const { history, getHistory, chartKeyPoints, fetchMore, isLoading, isError, progress } = historyData
+    const [ settings ] = useAtom(appSettingsAtom)
 
     const [ chartData, setChartData ] = useState([])
     const [ chartDataInverted, setChartDataInverted ] = useState([])
@@ -50,7 +53,7 @@ export default function HistoriesPage({ historyData }) {
 
     useEffect(() => {
         if (!history[tokenToUse]) {
-            getHistory(tokenToUse)
+            getHistory(tokenToUse, true, settings)
         }
     }, [])
 
@@ -65,13 +68,13 @@ export default function HistoriesPage({ historyData }) {
             {history?.[tokenToUse]?.length > 0 ? <div>
                 <div>
                     <div>
-                        7D: {chartData.length - (24*7) > 0 ? parseFloat((chartData[chartData.length - 1]?.price / chartData[chartData.length - (24*7)]?.price) * 100 - 100).toFixed(2) : ''} % <br/>
+                        7D: {chartData.length - (/4*7) > 0 ? parseFloat((chartData[chartData.length - 1]?.price / chartData[chartData.length - (24*7)]?.price) * 100 - 100).toFixed(2) : ''} % <br/>
                         24H: {chartData.length - 24 > 0 ? parseFloat((chartData[chartData.length - 1]?.price / chartData[chartData.length - 24]?.price) * 100 - 100).toFixed(2) : ''} % <br/>
                         1H: {chartData.length - 1 > 0 ? parseFloat((chartData[chartData.length - 1]?.price / chartData[chartData.length - 2]?.price) * 100 - 100).toFixed(2) : ''} % <br/>
                         Load Time: {(Number(progress.end) - Number(progress.start)) / 1_000} s<br/>
                         Length: {chartData.length} ({Math.floor(chartData.length / 24)} days)
                         <button 
-                            onClick={() => fetchMore(tokenToUse)}
+                            onClick={() => fetchMore(tokenToUse, settings)}
                             disabled={isLoading}
                             style={{ marginLeft: '10px' }}
                         >

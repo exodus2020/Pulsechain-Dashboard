@@ -558,6 +558,151 @@ export const fetchLPHistory = async (
     }
 }
 
+
+export const fetchLPHistoryKeyPoints = async (
+    lpAddress, 
+    fromBlock, 
+    toBlock, 
+    chunkSize = 10000, 
+    network = 'mainnet', 
+    settings = defaultSettings,
+    tokenInfo = null
+) => {
+    const fetchWithRetry = async (fn, retries, delayMs, ...args) => {
+        for (let i = 0; i < retries; i++) {
+            try {
+                return await fn(...args);
+            } catch (error) {
+                if (i === retries - 1) throw error;
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+        }
+    };
+
+    const fetchTargetedSyncEvents = async () => {
+        const provider = createProvider(settings.rpcs[network]);
+        const lpContract = new ethers.Contract(lpAddress, plpAbi, provider);
+
+        // Get current reserves at toBlock
+        const currentReserves = await lpContract.getReserves({ blockTag: toBlock });
+        const currentReserve0 = BigInt(currentReserves?.[0]?.toString() ?? 1);
+        const currentReserve1 = BigInt(currentReserves?.[1]?.toString() ?? 1);
+
+        // Calculate price using proper decimals
+        const decimals0 = Number(tokenInfo?.token0?.decimals ?? 18);
+        const decimals1 = Number(tokenInfo?.token1?.decimals ?? 18);
+
+        const currentPrice = currentReserve0 > 0n 
+            ? (Number(currentReserve1) / Math.pow(10, decimals1)) / 
+              (Number(currentReserve0) / Math.pow(10, decimals0))
+            : 0;
+        const currentPriceInverted = currentReserve1 > 0n 
+            ? (Number(currentReserve0) / Math.pow(10, decimals0)) / 
+              (Number(currentReserve1) / Math.pow(10, decimals1))
+            : 0;
+
+        // Initialize events array and reserves
+        const events = [];
+        let reserve0 = currentReserve0;
+        let reserve1 = currentReserve1;
+
+        // Define target times and block offsets (1 block ≈ 10s), relative to toBlock
+        const blockRanges = [
+            { time: '1m', blocks: 6, range: 2000 },     // 6 blocks = 1 minute
+            { time: '1h', blocks: 360, range: 3000 },   // 360 blocks = 1 hour
+            { time: '6h', blocks: 2160, range: 3000 },  // 2160 blocks = 6 hours
+            { time: '24h', blocks: 8640, range: 3000 }, // 8640 blocks = 24 hours
+            { time: '7d', blocks: 60480, range: 3000 }  // 60480 blocks = 7 days
+        ];
+
+        for (const { blocks, range } of blockRanges) {
+            const targetBlock = toBlock - blocks;
+            const startBlock = Math.max(fromBlock, targetBlock - range);
+            const endBlock = Math.min(toBlock, targetBlock + range);
+
+            // Fetch Sync events in the block range
+            const syncEvents = await fetchWithRetry(
+                async () => await lpContract.queryFilter(lpContract.filters.Sync(), startBlock, endBlock),
+                5,
+                1500
+            );
+
+            // Format sync events
+            const formattedSyncEvents = syncEvents.map(e => ({
+                type: 'sync',
+                blockNumber: e.blockNumber,
+                reserve0: e.args.reserve0.toString(),
+                reserve1: e.args.reserve1.toString()
+            }));
+
+            // Find the event closest to the target block
+            const closestEvent = formattedSyncEvents.reduce((closest, event) => {
+                if (!closest) return event;
+                const currentDiff = Math.abs(event.blockNumber - targetBlock);
+                const closestDiff = Math.abs(closest.blockNumber - targetBlock);
+                return currentDiff < closestDiff ? event : closest;
+            }, null);
+
+            if (closestEvent) {
+                // Calculate price for the closest event
+                const eventReserve0 = BigInt(closestEvent.reserve0);
+                const eventReserve1 = BigInt(closestEvent.reserve1);
+                closestEvent.price = eventReserve0 > 0n 
+                    ? (Number(eventReserve1) / Math.pow(10, decimals1)) / 
+                      (Number(eventReserve0) / Math.pow(10, decimals0))
+                    : 0;
+                closestEvent.priceInverted = eventReserve1 > 0n 
+                    ? (Number(eventReserve0) / Math.pow(10, decimals0)) / 
+                      (Number(eventReserve1) / Math.pow(10, decimals1))
+                    : 0;
+
+                events.push(closestEvent);
+            }
+        }
+
+        // Explicitly add current block price
+        events.push({
+            type: 'current',
+            blockNumber: toBlock,
+            price: currentPrice,
+            priceInverted: currentPriceInverted
+        });
+
+        // Sort events from newest to oldest
+        events.sort((a, b) => b.blockNumber - a.blockNumber);
+
+        // Return ending reserves along with other data
+        return { 
+            events, 
+            currentPrice, 
+            currentPriceInverted,
+            endingReserve0: reserve0,
+            endingReserve1: reserve1
+        };
+    };
+
+    try {
+        const result = await fetchWithRetry(fetchTargetedSyncEvents, 5, 1000);
+        return {
+            events: result.events
+                .sort((a, b) => b.blockNumber - a.blockNumber)
+                .map(e => ({
+                    blockNumber: e.blockNumber,
+                    price: e.price,
+                    priceInverted: e.priceInverted
+                })),
+            currentPrice: result.currentPrice,
+            currentPriceInverted: result.currentPriceInverted,
+            endingReserve0: result.endingReserve0,
+            endingReserve1: result.endingReserve1
+        };
+    } catch (error) {
+        console.error('Error fetching LP history:', error);
+        throw error;
+    }
+};
+
+
 export const fetchMoreLPHistory = async (
     lpAddress,
     fromBlock,
@@ -1259,12 +1404,14 @@ export const batchFetchTokenInfo = async (tokenAddresses, network = 'mainnet', s
 }
 
 export const batchFindPulseXPairs = async (addresses, network = 'mainnet', settings = defaultSettings) => {
+    const PULSEX_V1_FACTORY = '0x1715a3E4A142d8b698131108995174F37aEBA10D'
     const PULSEX_V2_FACTORY = '0x29eA7545DEf87022BAdc76323F373EA1e707C523'
     const WPLS = '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
     const BATCH_SIZE = 100
     
     try {
         const web3 = new Web3(settings.rpcs[network][0])
+        const v1Factory = new web3.eth.Contract(plsxFactoryAbi, PULSEX_V1_FACTORY)
         const factoryContract = new web3.eth.Contract(plsxFactoryAbi, PULSEX_V2_FACTORY)
         const validPairs = []
 
@@ -1284,6 +1431,7 @@ export const batchFindPulseXPairs = async (addresses, network = 'mainnet', setti
                             if (!error && pair && pair !== '0x0000000000000000000000000000000000000000') {
                                 validPairs.push({
                                     a: tokenAddress,
+                                    v: 'v2',
                                     pairAddress: pair.toLowerCase(),
                                     needsVerification: true
                                 })
@@ -1294,10 +1442,11 @@ export const batchFindPulseXPairs = async (addresses, network = 'mainnet', setti
                     )
 
                     batch.add(
-                        factoryContract.methods.getPair(tokenAddress, WPLS).call.request({}, (error, pair) => {
+                        v1Factory.methods.getPair(tokenAddress, WPLS).call.request({}, (error, pair) => {
                             if (!error && pair && pair !== '0x0000000000000000000000000000000000000000') {
                                 validPairs.push({
                                     a: tokenAddress,
+                                    v: 'v1',
                                     pairAddress: pair.toLowerCase(),
                                     needsVerification: true
                                 })
@@ -1362,7 +1511,7 @@ export const batchFindPulseXPairs = async (addresses, network = 'mainnet', setti
                         lpContract.methods.getReserves().call.request({}, (error, reserves) => {
                             if (!error && reserves) {
                                 results.push({
-                                    version: 'v2',
+                                    version: pair.v,
                                     a: pair.a,
                                     pairId: pair.pairAddress,
                                     token0: {
@@ -1385,7 +1534,7 @@ export const batchFindPulseXPairs = async (addresses, network = 'mainnet', setti
             })
         }
 
-        return results
+        return results.sort((a, b) => a.version === 'v1' ? -1 : 1)
 
     } catch (error) {
         console.error('Error in batchFindPulseXPairs:', error)

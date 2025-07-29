@@ -6,6 +6,7 @@
             "icon": "https://gitlab.com/pulsechain-lunagray/lunarshard-server/-/raw/main/pkg/app/dist/images/logo/logo_64x64.png?ref_type=heads?ref_type=heads",
             "folder": "lunarshard",
             "repoUrl": "https://gitlab.com/pulsechain-lunagray/lunarshard-server.git",
+            "buildPath": "pkg/app/dist",
             "webUrl": "https://lunarshard.limo",
             "tags": ["Utility","Strorage","File-Sharing"],
             "description": "LunarShard is a decentralized storage platform that allows users to store and share files in an immutable and censorship-resistant manner.",

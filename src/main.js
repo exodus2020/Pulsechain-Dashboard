@@ -9,31 +9,39 @@ const http2 = require('isomorphic-git/http/node')
 const isDev = process.env.NODE_ENV === 'development'
 const fetch = require('node-fetch')
 
-function createWindow() {
-  // Get the primary display dimensions
-  const primaryDisplay = screen.getPrimaryDisplay()
-  const { width, height } = primaryDisplay.workAreaSize
-
-  const win = new BrowserWindow({
-    width: width,
-    height: height,
+let mainWindow = null
+const defaultConfig = {
+    width: 900,
+    height: 950,
     minWidth: 900,
-    minHeight: 600,
-    icon: process.platform === 'darwin' 
-      ? path.join(__dirname, 'icons/logo.icns')  // for macOS
-      : path.join(__dirname, 'icons/logo64x64.png'), // for Windows/Linux
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: true,
-      contextIsolation: true
-    }
-  })
+    minHeight: 950,
+    alwaysOnTop: false,
+    frame: true
+}
 
-  if (isDev) {
-    win.loadURL('http://localhost:5173')
-  } else {
-    win.loadFile(path.join(__dirname, '../dist/index.html'))
-  }
+function createWindow() {
+    const primaryDisplay = screen.getPrimaryDisplay()
+    const { width, height } = primaryDisplay.workAreaSize
+
+    mainWindow = new BrowserWindow({
+        ...defaultConfig,
+        height,
+        width,
+        icon: process.platform === 'darwin' 
+            ? path.join(__dirname, 'icons/logo.icns')
+            : path.join(__dirname, 'icons/logo64x64.png'),
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            nodeIntegration: true,
+            contextIsolation: true
+        }
+    })
+
+    if (isDev) {
+        mainWindow.loadURL('http://localhost:5173')
+    } else {
+        mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+    }
 }
 
 app.whenReady().then(createWindow)
@@ -87,7 +95,7 @@ ipcMain.handle('clone-repo', async (event, repoUrl, folder) => {
 
 const servers = new Map()
 
-ipcMain.handle('serve-webapp', async (event, folder, port) => {
+ipcMain.handle('serve-webapp', async (event, folder, port, buildPath) => {
   return new Promise((resolve, reject) => {
     // Stop existing server for this folder if it exists
     if (servers.has(folder)) {
@@ -96,7 +104,9 @@ ipcMain.handle('serve-webapp', async (event, folder, port) => {
     }
 
     const expressApp = express()
-    const publicPath = path.join(app.getPath('userData'), 'public', folder, 'pkg', 'app', 'dist')
+    const publicPath = !buildPath 
+       ? path.join(app.getPath('userData'), 'public', folder, 'pkg', 'app', 'dist')
+       : path.join(app.getPath('userData'), 'public', folder, buildPath)
     
     // Check if the directory exists
     if (!fs.existsSync(publicPath)) {
@@ -243,4 +253,85 @@ ipcMain.handle('delete-file', async (event, filename) => {
     console.error('Error deleting file:', error)
     return false
   }
+})
+
+function toggleMode (width, height) {
+  if (!mainWindow) return false
+
+  const currentMode = mainWindow.isAlwaysOnTop()
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize
+  
+  if (currentMode) {
+      // Switch back to default mode
+      mainWindow.setAlwaysOnTop(false)
+      mainWindow.setMaximumSize(2147483647, 2147483647) // Reset max size first
+      mainWindow.setMinimumSize(defaultConfig.width, defaultConfig.height)
+      mainWindow.setSize(defaultConfig.width, defaultConfig.height, true) // true forces immediate resize
+      mainWindow.setAutoHideMenuBar(false)
+      mainWindow.setMenuBarVisibility(true)
+      
+      // Center the window
+      const x = Math.floor((screenWidth - defaultConfig.width) / 2)
+      const y = Math.floor((screenHeight - defaultConfig.height) / 2)
+      mainWindow.setPosition(x, y, true)
+  } else {
+      // Switch to custom mode
+      mainWindow.setAlwaysOnTop(true, 'screen-saver')
+      mainWindow.setMinimumSize(width, height)
+      mainWindow.setMaximumSize(width, height)
+      mainWindow.setSize(width, height, true) // true forces immediate resize
+      mainWindow.setAutoHideMenuBar(true)
+      mainWindow.setMenuBarVisibility(false)
+      
+      // Position in lower right corner with 20px padding
+      const x = screenWidth - width
+      const y = screenHeight - height
+      mainWindow.setPosition(x, y, true)
+  }
+  
+  return !currentMode
+}
+
+ipcMain.handle('toggle-mode', async (event, height, width) => {
+    if (!mainWindow) return false
+
+    const currentMode = mainWindow.isAlwaysOnTop()
+    const primaryDisplay = screen.getPrimaryDisplay()
+    const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize
+    
+    if (currentMode) {
+        // Switch back to default mode
+        mainWindow.setAlwaysOnTop(false)
+        mainWindow.setMaximumSize(2147483647, 2147483647) // Reset max size first
+        mainWindow.setMinimumSize(defaultConfig.width, defaultConfig.height)
+        mainWindow.setSize(defaultConfig.width, defaultConfig.height, true) // true forces immediate resize
+        mainWindow.setAutoHideMenuBar(false)
+        mainWindow.setMenuBarVisibility(true)
+        
+        // Center the window
+        const x = Math.floor((screenWidth - defaultConfig.width) / 2)
+        const y = Math.floor((screenHeight - defaultConfig.height) / 2)
+        mainWindow.setPosition(x, y, true)
+    } else {
+        // Switch to custom mode
+        mainWindow.setAlwaysOnTop(true, 'screen-saver')
+        mainWindow.setMinimumSize(width, height)
+        mainWindow.setMaximumSize(width, height)
+        mainWindow.setSize(width, height, true) // true forces immediate resize
+        mainWindow.setAutoHideMenuBar(true)
+        mainWindow.setMenuBarVisibility(false)
+        
+        // Position in lower right corner with 20px padding
+        const x = screenWidth - width
+        const y = screenHeight - height
+        mainWindow.setPosition(x, y, true)
+    }
+    
+    return !currentMode
+})
+
+ipcMain.handle('get-mode', async (event) => {
+  if(!mainWindow) return false
+  return mainWindow.isAlwaysOnTop()
 })

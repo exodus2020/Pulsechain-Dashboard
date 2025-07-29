@@ -1,5 +1,6 @@
 import React, { memo, useState } from 'react';
 import styled from 'styled-components';
+import ImgQuestion from "../icons/question.png";
 
 const IconWrapper = styled.div`
   border-radius: 5px;
@@ -22,7 +23,7 @@ const ImageContainer = ({ source, size = 24, style = {}}) => {
 
   return (
     <IconWrapper size={size} style={style}>
-      {!error ? <img src={source} style={{ height: size, width: size}} onError={() =>{setError(true)}}/> : ''}
+      <img src={error ? ImgQuestion : source} style={{ height: size, width: size}} onError={() =>{setError(true)}}/>
     </IconWrapper>
   );
 };
