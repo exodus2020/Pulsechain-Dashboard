@@ -1,3 +1,4 @@
+// HexComponent.jsx
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import styled from "styled-components"
 import { shortenString } from "../lib/string"

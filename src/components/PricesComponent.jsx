@@ -1,3 +1,4 @@
+// PricesComponent.jsx
 import { memo, useCallback, useMemo, useState } from "react"
 import styled from "styled-components"
 
@@ -91,9 +92,9 @@ function PricesComponent ({ historyData, priceData, getImage }) {
         'history': plsHistory,
         'tokenInfo': plsPrice,
         'lows': {
-            'price': 0.00001654,
-            'priceWPLS': 0.00001654,
-        },
+        'price': 0.000009536,
+        'priceWPLS': 0.000009536,
+    },
         'image': ImgPLS
     }
 
@@ -128,7 +129,7 @@ function PricesComponent ({ historyData, priceData, getImage }) {
             'name': 'HEX',
             'price': hexPrice?.priceUsd,
             'priceWPLS': hexPrice?.priceWpls,
-            'history': chartKeyPoints?.['0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65'] ?? [],
+            'history': chartKeyPoints?.[hexPrice?.pairId] ?? [],
             'tokenInfo': hexPrice,
             'lows': {
                 'price': 0.003633,
@@ -136,6 +137,7 @@ function PricesComponent ({ historyData, priceData, getImage }) {
             },
             'image': ImgHEX,
             'bestStable': priceData?.bestStable
+            
         },
     ], [prices, history, getImage])
 
@@ -346,8 +348,8 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, invert = false, name, pr
     const [ singleTokenModal, setSingleTokenModal ] = useAtom(tokenModalAtom)
     const priceModifier = (property) => isPls ? 1 : priceComparison[property]
 
-    const priceProperty = invert ? 'priceInverted' : 'price'
-    const usdSelected = selectedCurrency === 'USD' || selectedCurrency === 'X'
+    const priceProperty = tokenInfo?.invertReserves ? 'priceInverted' : 'price'
+    const usdSelected = selectedCurrency === 'USD'
 
     const lastPrice = isPls ? (!invert ? 1 / priceWPLS : price)
         : usdSelected ? (invert ? priceWPLS : price) : (invert ? price : priceWPLS)
@@ -370,9 +372,12 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, invert = false, name, pr
 
     const changeDenominator = selected === '1H' ? lastHourPrice : selected === '6H' ? lastSixHourPrice : selected === '24H' ? lastDayPrice : selected === '7D' ? sevenDayPrice : selected === 'ATL' ? allTimeLowPrice : lastPrice
     const percentPrice = selected === 'ATL' ? (usdSelected ? price : priceWPLS) : lastPrice
-    const percentChangeRaw = 
-        selectedCurrency === 'X' ? (percentPrice / changeDenominator)
-        : (percentPrice / changeDenominator - 1) * 100
+    const percentChangeRaw =
+        selectedCurrency === 'X'
+        ? (percentPrice / changeDenominator)
+        : selected === 'ATL'
+            ? ((percentPrice - changeDenominator) / changeDenominator) * 100
+            : (percentPrice / changeDenominator - 1) * 100
     const percentChange = percentChangeRaw < 0.05 && percentChangeRaw > -0.05 ? 0 : percentChangeRaw
     const isX = selectedCurrency === 'X'
     const percentChangeColor = (!isX && percentChange > 0.75) || (isX && percentChange > 1.03) ? 'rgb(130,255,130)' : (!isX && percentChange < -0.75) || (isX && percentChange < 0.97) ? 'rgb(255,130,130)' : 'rgb(170,170,170)'

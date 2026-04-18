@@ -47,22 +47,28 @@ export default function LockPage () {
     const [ isNewUser, setIsNewUser ] = useState(undefined)
 
     const testLoadData = async () => {
-        const response = await window.electron.loadFile('config.json')
-        if (response) {
-            try {
-                const isUnencrypted = JSON.parse(response ?? {})
-                setSettings(isUnencrypted?.settings ?? defaultSettings)
-                setKey('')
-                setIsNewUser(false)
-            } catch {
-                setIsNewUser(false)
-            }
-            
-        } else {
-            setSettings(defaultSettings)
-            setIsNewUser(true)
-        }
+    if (!window.electron?.loadFile) {
+        setSettings(defaultSettings)
+        setKey('')
+        setIsNewUser(true)
+        return
     }
+
+    const response = await window.electron.loadFile('config.json')
+    if (response) {
+        try {
+            const isUnencrypted = JSON.parse(response ?? '{}')
+            setSettings(isUnencrypted?.settings ?? defaultSettings)
+            setKey('')
+            setIsNewUser(false)
+        } catch {
+            setIsNewUser(false)
+        }
+    } else {
+        setSettings(defaultSettings)
+        setIsNewUser(true)
+    }
+}
 
     const handleFileSelect = async (event) => {
         const file = event.target.files[0];

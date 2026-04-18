@@ -1,3 +1,4 @@
+// Input.jsx
 import { useState, useRef } from "react";
 import styled from "styled-components";
 import Button from "./Button";
@@ -10,7 +11,7 @@ const InputWrapper = styled.div`
 
         input {
             background: rgb(40,40,40);
-            border: ${props => props.error ? '1px solid rgb(200,100,100)' : '1px solid rgb(70,70,70)'};
+            border: ${props => props.$error ? '1px solid rgb(200,100,100)' : '1px solid rgb(70,70,70)'};
             border-radius: 4px;
             padding: 8px 12px;
             color: white;
@@ -74,7 +75,7 @@ export function Input({
     };
 
     return (
-        <InputWrapper error={error} style={style}>
+        <InputWrapper $error={error} style={style}>
             <div className="input-container" style={containerStyle}>
                 <div style={{ paddingRight: 20 }}>
                     <input

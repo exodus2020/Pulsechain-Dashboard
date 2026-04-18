@@ -1,3 +1,4 @@
+// usePrice.jsx
 import { useState, useEffect, useRef } from "react"
 import { useAtom } from "jotai"
 import { appErrorAtom, appSettingsAtom } from "../store"

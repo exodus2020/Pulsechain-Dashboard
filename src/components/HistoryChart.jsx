@@ -1,3 +1,4 @@
+// HistoryChart.jsx
 import { memo, useMemo, useState } from "react"
 import BasicChart from "./BasicChart"
 import Button from "./Button"

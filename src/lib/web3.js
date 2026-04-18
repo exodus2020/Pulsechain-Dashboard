@@ -1,3 +1,4 @@
+// web3.js
 import axios from "axios"
 import { plpAbi } from "./abi/plp-abi"
 import { ethers } from 'ethers'
@@ -566,7 +567,8 @@ export const fetchLPHistoryKeyPoints = async (
     chunkSize = 10000, 
     network = 'mainnet', 
     settings = defaultSettings,
-    tokenInfo = null
+    tokenInfo = null,
+    include30d = false
 ) => {
     const fetchWithRetry = async (fn, retries, delayMs, ...args) => {
         for (let i = 0; i < retries; i++) {
@@ -608,11 +610,12 @@ export const fetchLPHistoryKeyPoints = async (
 
         // Define target times and block offsets (1 block ≈ 10s), relative to toBlock
         const blockRanges = [
-            { time: '1m', blocks: 6, range: 2000 },     // 6 blocks = 1 minute
-            { time: '1h', blocks: 360, range: 3000 },   // 360 blocks = 1 hour
-            { time: '6h', blocks: 2160, range: 3000 },  // 2160 blocks = 6 hours
-            { time: '24h', blocks: 8640, range: 3000 }, // 8640 blocks = 24 hours
-            { time: '7d', blocks: 60480, range: 3000 }  // 60480 blocks = 7 days
+            { time: '1m', blocks: 6, range: 2000 },
+            { time: '1h', blocks: 360, range: 3000 },
+            { time: '6h', blocks: 2160, range: 3000 },
+            { time: '24h', blocks: 8640, range: 3000 },
+            { time: '7d', blocks: 60480, range: 6000 },
+            ...(include30d ? [{ time: '30d', blocks: 259200, range: 12000 }] : [])
         ];
 
         for (const { blocks, range } of blockRanges) {

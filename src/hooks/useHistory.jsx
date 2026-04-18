@@ -1,3 +1,4 @@
+// useHistory.jsx
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { fetchLPHistory, fetchMoreLPHistory, fetchLatestLPHistory, fetchLPHistoryKeyPoints } from '../lib/web3'
 import { PULSECHAIN_FIRST_BLOCK } from '../lib/web3'
@@ -9,6 +10,7 @@ import { useAtom } from 'jotai'
 export default function useHistory({ priceData }) {
     const [history, setHistory] = useState({})
     const [chartKeyPoints, setChartKeyPoints] = useState({})
+    const [dailyCandles, setDailyCandles] = useState({})
     const [reserves, setReserves] = useState({})
     const isLoading = useRef(false)
     const isLoadingChart = useRef([])
@@ -28,9 +30,33 @@ export default function useHistory({ priceData }) {
     const { prices } = priceData
     const bestStable = priceData?.bestStable
     const isReady = Object.keys(prices).length > 0 && bestStable?.pair
+    const getTokenInfoForLp = useCallback((lpAddress) => {
+    if (!lpAddress) return null
 
-    const DAYS = 7// 7 days is about 3mb data + 42s load time
-    const CHUNK_SIZE = 100000
+    const normalizedLp = lpAddress.toLowerCase()
+
+    const directTokenAddress = Object.keys(prices).find(
+        address => prices[address]?.pairId?.toLowerCase() === normalizedLp
+    )
+
+    if (directTokenAddress) {
+        return prices[directTokenAddress]
+    }
+
+    // Fallbacks for hardcoded pairs used in this file
+    if (normalizedLp === '0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9') {
+        return Object.values(prices).find(p => p.symbol === 'PLSX') ?? null
+    }
+
+    if (normalizedLp === '0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa') {
+        return Object.values(prices).find(p => p.symbol === 'INC') ?? null
+    }
+
+    return null
+}, [prices])
+
+    const DAYS = 30// 30 days of data for 30D change
+    const CHUNK_SIZE = 50000
     const BLOCKS_TO_FETCH = 86400 / 10 * DAYS // One day worth of blocks
     const BLOCKS_PER_HOUR = 360 // 10 seconds per block * 360 = 1 hour
     const SECONDS_PER_BLOCK = 10
@@ -42,6 +68,7 @@ export default function useHistory({ priceData }) {
 
     const resetHistory = () => {
         setHistory({})
+        setDailyCandles({})
         setReserves({})
         isLoading.current = false
         isError.current = false
@@ -65,34 +92,53 @@ export default function useHistory({ priceData }) {
                 initializing.current = true
 
                 const bestStableAddress = bestStable?.pair ?? '0xe56043671df55de5cdf8459710433c10324de0ae'
+                const plsPairId = Object.values(prices).find(p => p.symbol === 'PLS')?.pairId ?? bestStableAddress
+                const hexPairId = Object.values(prices).find(p => p.symbol === 'HEX')?.pairId
+
+                const initialPairs = [
+                    plsPairId,
+                    bestStableAddress,
+                    '0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9', // PLSX
+                    '0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa', // INC
+                    hexPairId ?? '0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65' // HEX
+                ].filter((value, index, array) => value && array.indexOf(value) === index)
                 
+                fetchDailyCandles(bestStableAddress)
+                getChartHistory(bestStableAddress, true, settings)
 
                 try {
-                    const results = await Promise.allSettled([
-                        getHistory(bestStableAddress, false, settings), // DAI, USDC, USDT
-                        getHistory('0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9', false, settings), // PLSX
-                        getHistory('0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa', false, settings), // INC
-                        getHistory('0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65', false, settings) // HEX
-                    ])
+                    const results = await Promise.allSettled(
+                        initialPairs.map(address => getHistory(address, false, settings))
+                    )
 
-                    const parsedHistory = results.reduce((acc, i) => {
-                        acc = { ...acc, [i.value.address]: i.value.history }
+                    const fulfilledResults = results
+                        .filter(result => result.status === 'fulfilled' && result.value && result.value.address)
+
+                    const parsedHistory = fulfilledResults.reduce((acc, result) => {
+                        acc[result.value.address] = result.value.history
                         return acc
                     }, {})
-                    const parsedReserves = results.reduce((acc, i) => {
-                        acc = { ...acc, [i.value.address]: i.value.history }
-                        return acc
+
+                    const parsedReserves = fulfilledResults.reduce((acc, result) => {
+                        acc[result.value.address] = result.value.reserves
+                            return acc
                     }, {})
-                    // setHistory(parsedHistory)
-                    setChartKeyPoints(parsedHistory)
-                    setReserves(parsedReserves)
+
+// setHistory(parsedHistory)
+setChartKeyPoints(prev => ({ ...prev, ...parsedHistory }))
+Object.keys(parsedHistory).forEach(address => {
+    if (address !== bestStableAddress) {
+        fetchDailyCandles(address)
+    }
+})
+setReserves(prev => ({ ...prev, ...parsedReserves }))
                 } catch (error) {
                     console.error('Error in getInitialData, attempting again')
                     try {
                         getHistory(bestStableAddress, true, settings).then(() => { //WPLS-DAI
                             getHistory('0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9', true, settings).then(() => { // WPLS-PLSX
                                 getHistory('0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa', true, settings).then(() => { // WPLS-Incentive
-                                    getHistory('0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65', true, settings).then(() => { // WPLS-HEX
+                                    getHistory(hexPairId ?? '0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65', true, settings).then(() => { // WPLS-HEX
                                         setInit(true)
                                     })
                                 })
@@ -107,21 +153,28 @@ export default function useHistory({ priceData }) {
                     setInit(true)
                 }
 
-                try {
-                    getChartHistory(bestStableAddress, true, settings)
-                } catch (error) {
-                    console.error('failed to retrieve best stable')
-                }
+                // already started above so the full stable history fetch overlaps startup
+
             }
             getInitialData()
-        } else if (init && priceData.bestStableUpdated > 0) {
-            const bestStableAddress = bestStable?.pair ?? '0xe56043671df55de5cdf8459710433c10324de0ae'
+        } else if (init && bestStable?.pair) {
+    const bestStableAddress = bestStable.pair
 
-            if (!history?.[bestStableAddress]) {
-                console.log('stable switched')
-                getChartHistory(bestStableAddress, true, settings)
-            }
-        }
+    if (!history?.[bestStableAddress]?.length) {
+        console.log('hydrating stable full history')
+        getChartHistory(bestStableAddress, true, settings)
+    }
+
+    if (!chartKeyPoints?.[bestStableAddress]?.length) {
+        console.log('hydrating stable short history')
+        getHistory(bestStableAddress, true, settings)
+    }
+
+    if (!dailyCandles?.[bestStableAddress]?.length) {
+        console.log('hydrating stable daily candles')
+        fetchDailyCandles(bestStableAddress)
+    }
+}
     }, [priceData.bestStable, Object.keys(prices).length, priceData.bestStableUpdated, init])
 
     const batchFetchHistory = async () => {
@@ -133,16 +186,20 @@ export default function useHistory({ priceData }) {
                 getHistory('0xae8429918fdbf9a5867e3243697637dc56aa76a1', false, settings),
                 getHistory('0xe0e1f83a1c64cf65c1a86d7f3445fc4f58f7dcbf', false, settings),
                 getHistory('0x42abdfdb63f3282033c766e72cc4810738571609', false, settings) 
-            ])
+])
 
-            const parsedHistory = results.reduce((acc, i) => {
-                acc = { ...acc, [i.value.address]: i.value.history }
+            const fulfilledResults = results
+                .filter(result => result.status === 'fulfilled' && result.value && result.value.address)
+
+            const parsedHistory = fulfilledResults.reduce((acc, result) => {
+                acc[result.value.address] = result.value.history
                 return acc
-            }, {})
-            const parsedReserves = results.reduce((acc, i) => {
-                acc = { ...acc, [i.value.address]: i.value.history }
+}, {})
+
+            const parsedReserves = fulfilledResults.reduce((acc, result) => {
+                acc[result.value.address] = result.value.reserves
                 return acc
-            }, {})
+}, {})
 
             // setHistory(prev => ({ ...prev, ...parsedHistory }))
             setChartKeyPoints(prev => ({ ...prev, ...parsedHistory }))
@@ -166,7 +223,7 @@ export default function useHistory({ priceData }) {
     }
 
     const getHistory = useCallback(async (lpAddress, saveToState = true, settings = defaultSettings) => {
-        if (saveToState && (!lpAddress || isLoading.current || chartKeyPoints?.[lpAddress])) return false
+        if (saveToState && (!lpAddress || isLoading.current || chartKeyPoints?.[lpAddress]?.length > 0)) return false
 
         try {
             isLoading.current = true
@@ -191,9 +248,7 @@ export default function useHistory({ priceData }) {
 
             const start = new Date().getTime()
             setProgress({ ...progress, start, end: null, status: `fetching ${lpAddress}` })
-
-            const tokenAddress = Object.keys(prices).find(f => prices[f].pairId === lpAddress)
-            const tokenInfo = prices[tokenAddress]
+            const tokenInfo = getTokenInfoForLp(lpAddress) ?? {}
 
             const { 
                 events, 
@@ -208,7 +263,8 @@ export default function useHistory({ priceData }) {
                 CHUNK_SIZE,
                 'mainnet',
                 settings,
-                tokenInfo
+                tokenInfo,
+                false
             )
             
             setProgress({ ...progress, start, end: new Date().getTime() })
@@ -295,7 +351,37 @@ export default function useHistory({ priceData }) {
             isError.current = true
             return false
         }
+        
     }, [prices])
+    const fetchDailyCandles = async (lpAddress) => {
+    try {
+        const url = `https://api.geckoterminal.com/api/v2/networks/pulsechain/pools/${lpAddress}/ohlcv/day?aggregate=1&limit=100`
+
+        const res = await fetch(url)
+        const json = await res.json()
+
+        const candles = json?.data?.attributes?.ohlcv_list ?? []
+
+        // Format: [timestamp, open, high, low, close, volume]
+        const parsed = candles
+        .map(c => ({
+            timestamp: c[0] * 1000,
+            open: c[1],
+            high: c[2],
+            low: c[3],
+            close: c[4],
+            volume: c[5]
+    }))
+    .sort((a, b) => a.timestamp - b.timestamp)
+
+        setDailyCandles(prev => ({
+            ...prev,
+            [lpAddress]: parsed
+        }))
+    } catch (err) {
+        console.error('Failed to fetch Gecko candles:', lpAddress, err)
+    }
+}
 
     const getChartHistory = useCallback(async (lpAddress, saveToState = true, settings = defaultSettings) => {
         const loadingChart = isLoadingChart.current.find(f => f === lpAddress?.toLowerCase()) ? true : false
@@ -331,23 +417,22 @@ export default function useHistory({ priceData }) {
             const start = new Date().getTime()
             setProgress({ ...progress, start, end: null, status: `fetching ${lpAddress}` })
 
-            const tokenAddress = Object.keys(prices).find(f => prices[f].pairId === lpAddress)
-            const tokenInfo = prices[tokenAddress]
-
+            const tokenInfo = getTokenInfoForLp(lpAddress) ?? {}
             const { 
                 events, 
                 currentPrice, 
                 currentPriceInverted,
                 endingReserve0,
                 endingReserve1
-            } = await fetchLPHistory(
+            } = await fetchLPHistoryKeyPoints(
                 lpAddress,
                 startBlock,
                 currentBlock,
                 CHUNK_SIZE,
                 'mainnet',
                 settings,
-                tokenInfo
+                tokenInfo,
+                true
             )
             
             setProgress({ ...progress, start, end: new Date().getTime() })
@@ -402,7 +487,6 @@ export default function useHistory({ priceData }) {
 
             if (!saveToState) {
                 isLoading.current = false
-                getHistory(lpAddress, true, settings)
                 return {
                     address: lpAddress,
                     history: sortedHistory,
@@ -430,7 +514,6 @@ export default function useHistory({ priceData }) {
             isLoading.current = false
             setIsFetchingFullHistory(false)
 
-            getHistory(lpAddress, true, settings)
             return true
 
         } catch (error) {
@@ -500,8 +583,7 @@ export default function useHistory({ priceData }) {
             const start = new Date().getTime()
             setProgress({ ...progress, start, end: null })
 
-            const tokenAddress = Object.keys(prices).find(f => prices[f].pairId === lpAddress)
-            const tokenInfo = prices[tokenAddress]
+            const tokenInfo = getTokenInfoForLp(lpAddress) ?? {}
 
             const { events, endingReserve0, endingReserve1 } = await fetchMoreLPHistory(
                 lpAddress,
@@ -595,8 +677,7 @@ export default function useHistory({ priceData }) {
 
             const currentHourBlock = Math.floor(currentBlock / BLOCKS_PER_HOUR) * BLOCKS_PER_HOUR
 
-            const tokenAddress = Object.keys(prices).find(f => prices[f].pairId === lpAddress)
-            const tokenInfo = prices[tokenAddress]
+            const tokenInfo = getTokenInfoForLp(lpAddress) ?? {}
             
             const { 
                 currentPrice, 
@@ -686,6 +767,7 @@ export default function useHistory({ priceData }) {
     return {
         history,
         chartKeyPoints,
+        dailyCandles,
         getHistory,
         getChartHistory,
         fetchMore,

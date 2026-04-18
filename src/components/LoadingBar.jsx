@@ -1,3 +1,4 @@
+// LoadingBar.jsx
 import { useEffect, useRef, memo } from 'react'
 import styled, { keyframes, css } from 'styled-components'
 
@@ -13,12 +14,10 @@ const Container = styled.div`
 `
 
 const Bar = styled.div.attrs(props => ({
-  'data-height': props.barheight,
-  'data-color': props.barcolor,
   style: {
-    height: props.barheight,
-    background: props.barcolor,
-    borderRadius: props.barheight
+    height: props.$barheight,
+    background: props.$barcolor,
+    borderRadius: props.$barheight
   }
 }))`
   width: 100%;
@@ -55,12 +54,11 @@ const ProgressBar = styled.div.attrs(props => ({
 `
 
 const DashedPattern = styled.div.attrs(props => ({
-  'data-pattern': props.patterncolor,
   style: {
     backgroundImage: `repeating-linear-gradient(
       90deg,
-      ${props.patterncolor} 0px,
-      ${props.patterncolor} 4px,
+      ${props.$patterncolor} 0px,
+      ${props.$patterncolor} 4px,
       transparent 4px,
       transparent 8px
     )`
@@ -128,8 +126,8 @@ const LoadingBarComponent = ({
     return (
         <Container>
             <Bar 
-                barheight={height}
-                barcolor={backgroundColor}
+                $barheight={height}
+                $barcolor={backgroundColor}
             >
                 <ProgressBar 
                     ref={progressRef}
@@ -139,7 +137,7 @@ const LoadingBarComponent = ({
                     $shimmercolor={shimmerColor}
                     style={{ '--progress': '0%' }}
                 />
-                <DashedPattern patterncolor={dashColor} />
+                <DashedPattern $patterncolor={dashColor} />
             </Bar>
         </Container>
     )

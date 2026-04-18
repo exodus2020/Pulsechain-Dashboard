@@ -1,3 +1,4 @@
+// SingleWallet.jsx
 import { useState, useEffect, useRef } from "react"
 import { icons_list } from "../config/icons"
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard"

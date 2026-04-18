@@ -1,3 +1,4 @@
+// main.js
 const { app, BrowserWindow, ipcMain, shell, screen } = require('electron')
 const path = require('path')
 const http = require('http')
@@ -23,6 +24,8 @@ function createWindow() {
     const primaryDisplay = screen.getPrimaryDisplay()
     const { width, height } = primaryDisplay.workAreaSize
 
+    console.log('MAIN __dirname:', __dirname)
+    console.log('PRELOAD PATH:', require('path').resolve(__dirname, 'preload.js'))
     mainWindow = new BrowserWindow({
         ...defaultConfig,
         height,
@@ -31,9 +34,10 @@ function createWindow() {
             ? path.join(__dirname, 'icons/logo.icns')
             : path.join(__dirname, 'icons/logo64x64.png'),
         webPreferences: {
-            preload: path.join(__dirname, 'preload.js'),
-            nodeIntegration: true,
-            contextIsolation: true
+          preload: path.join(__dirname, 'preload.js'),
+          nodeIntegration: false,
+          contextIsolation: true,
+          webSecurity: true
         }
     })
 
@@ -185,26 +189,50 @@ ipcMain.handle('checkVersion', async (event, folder) => {
 
 ipcMain.handle('getFile', async (event, url) => {
   try {
-    const response = await fetch(url)
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://pulsecoinlist.com/',
+        'Origin': 'https://pulsecoinlist.com'
+      }
+    })
+
+    const contentType = response.headers.get('content-type') || ''
+    const text = await response.text()
+
+    console.log('getFile DEBUG', {
+      url,
+      status: response.status,
+      ok: response.ok,
+      contentType,
+      preview: text.slice(0, 300)
+    })
+
     if (!response.ok) {
-      throw new Error('Network response was not ok')
+      throw new Error(`Network response was not ok: ${response.status}`)
     }
 
-    // Check if response is JSON
-    const contentType = response.headers.get('content-type')
-    if (contentType && contentType.includes('application/json')) {
-      return await response.json()
-    }
-
-    // Try to parse as JSON even if content-type is not JSON
     try {
-      const text = await response.text()
-      console.log(text)
-      return JSON.parse(text)
-    } catch (parseError) {
-      console.warn('Failed to parse response as JSON:', parseError)
+    return JSON.parse(text)
+  } catch (parseError) {
+    try {
+      const nextDataMatch = text.match(
+        /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/
+      )
+
+      if (nextDataMatch?.[1]) {
+        return JSON.parse(nextDataMatch[1])
+      }
+
+      console.warn('Failed to parse response as JSON or __NEXT_DATA__:', parseError)
+      return null
+    } catch (htmlParseError) {
+      console.warn('Failed to extract __NEXT_DATA__ from HTML:', htmlParseError)
       return null
     }
+  }
 
   } catch (error) {
     console.warn('Error fetching file:', error)

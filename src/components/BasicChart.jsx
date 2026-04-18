@@ -1,3 +1,4 @@
+// BasicChart.jsx
 import React, { memo, useEffect, useRef, useState } from 'react'
 import styled from 'styled-components'
 import { countLeadingZerosAfterDecimal, fUnit, getNumberAfterLeadingZeros } from '../lib/numbers'

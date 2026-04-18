@@ -1,3 +1,4 @@
+// AppContext.jsx
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import { defaultTokenInformation, fetchTokenList } from '../lib/tokens';
 import ImgQuestion from "../icons/question.png";
@@ -134,38 +135,43 @@ export const AppContextProvider = ({ children }) => {
     }
 
     const loadData = async () => {
-        const response = await window.electron.loadFile('config.json')
-
-        let imgRef = undefined
-        try {
-            const response = await window.electron.loadFile('tokenRef.json')
-            if (response) {
-                imgRef = JSON.parse(response ?? {})
-            }
-        } catch {
-            console.log('No tokenRef file found')
-        }
-
-        if (response) {
-            try {
-                const decryptedResponse = key ? await decryptWithHashedKey(key, response) : response
-                setData({
-                    ...JSON.parse(decryptedResponse ?? {})
-                    , imageRef: imgRef ?? {}
-                })
-                setUpdate(prev => prev + 1)
-            } catch (err) {
-                // failed to parse the JSON - issue w/ file 
-            }
-            
-        } else {
-            console.log('No data found')
-            await saveData(defaultContext)
-            setData(defaultContext)
-        }
-
+    if (!window.electron?.loadFile) {
+        console.log('Browser mode: skipping electron file load')
+        setData(defaultContext)
         setUpdate(1)
+        return
     }
+
+    const response = await window.electron.loadFile('config.json')
+
+    let imgRef = undefined
+    try {
+        const tokenRefResponse = await window.electron.loadFile('tokenRef.json')
+        if (tokenRefResponse) {
+            imgRef = JSON.parse(tokenRefResponse ?? '{}')
+        }
+    } catch {
+        console.log('No tokenRef file found')
+    }
+
+    if (response) {
+        try {
+            const decryptedResponse = key ? await decryptWithHashedKey(key, response) : response
+            setData({
+                ...JSON.parse(decryptedResponse ?? '{}'),
+                imageRef: imgRef ?? {}
+            })
+            setUpdate(prev => prev + 1)
+        } catch (err) {
+            console.error('Failed to parse config.json', err)
+        }
+    } else {
+        console.log('No data found')
+        setData(defaultContext)
+    }
+
+    setUpdate(1)
+}
 
     const updateImageUrReference = async () => {
         if (urlsFetched || loading) return

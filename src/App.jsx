@@ -1,3 +1,4 @@
+// App.jsx
 import { useCallback, useEffect, useRef } from 'react'
 import 'typeface-raleway'
 import Layout from './shared/Layout'

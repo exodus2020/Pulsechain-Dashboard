@@ -1,3 +1,4 @@
+// Button.jsx
 import styled from "styled-components";
 import Icon from "./Icon";
 import { icons_list } from "../config/icons";
@@ -10,7 +11,7 @@ const ButtonWrapper = styled.div`
   button {
       display: flex;
       align-items: center;
-      justify-content: ${props => props.textalign === 'center' ? 'center' : 'flex-start'};
+      justify-content: ${props => props.$textalign === 'center' ? 'center' : 'flex-start'};
       background: rgb(30,30,30);
       color: white;
       border: none;
@@ -34,7 +35,7 @@ const ButtonWrapper = styled.div`
       align-items: center;
       gap: 8px;
       width: 100%;
-      justify-content: ${props => props.textalign === 'center' ? 'center' : 'flex-start'};
+      justify-content: ${props => props.$textalign === 'center' ? 'center' : 'flex-start'};
   }
 
   &.button-disabled {
@@ -64,7 +65,7 @@ export default function Button({
         <ButtonWrapper 
             className={`${customClass ? customClass : ""} ${disabled ? 'button-disabled' : ''}`} 
             style={parentStyle ?? {}}
-            textalign={textAlign}
+            $textalign={textAlign}
         >
             <button 
                 onClick={() => disabled ? () => {} : onClick?.()} 

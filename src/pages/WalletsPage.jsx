@@ -1,3 +1,4 @@
+// WalletsPage.jsx
 import styled from "styled-components"
 import Button from "../components/Button"
 import { defaultTokenInformation, liquidityPairs } from "../lib/tokens"
@@ -6,7 +7,7 @@ import { hiddenWalletsAtom, hideHexMinersAtom, hideZeroValueAtom, liquiditySearc
 import { useAtom } from "jotai"
 import { useAppContext } from "../shared/AppContext"
 import Tooltip from "../shared/Tooltip"
-import React, { memo, useMemo } from "react"
+import React, { memo, useMemo, useEffect, useRef, useState } from "react"
 import SingleTokenButton from "../components/PricePage/SingleTokenButton"
 import LoadingWave from "../components/LoadingWave"
 import PriceJumbo from "../components/PricePage/PriceJumbo"
@@ -96,6 +97,59 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
     const watchlist = data?.watchlist ?? {}
     const [ hideZeroValue, setHideZeroValue ] = useAtom(hideZeroValueAtom)
     const [ hideHexMiners, setHideHexMiners ] = useAtom(hideHexMinersAtom)
+    const [ pulseMetrics, setPulseMetrics ] = useState([])
+    const [ cachedPulseOverrides, setCachedPulseOverrides ] = useState(() => {
+        try {
+            const cachedOverrides = localStorage.getItem('pulsePercentOverrides')
+            const parsedOverrides = cachedOverrides ? JSON.parse(cachedOverrides) : {}
+
+            if (parsedOverrides?.WPLS && !parsedOverrides?.PLS) {
+                parsedOverrides.PLS = parsedOverrides.WPLS
+            }
+
+            if (parsedOverrides?.PLS) {
+                return parsedOverrides
+            }
+
+            const cachedRowsRaw = localStorage.getItem('pulseMetrics')
+            const cachedRows = cachedRowsRaw ? JSON.parse(cachedRowsRaw) : []
+
+            if (!Array.isArray(cachedRows) || cachedRows.length === 0) {
+                return parsedOverrides
+            }
+
+            const rebuilt = cachedRows.reduce((acc, coin) => {
+            const symbol = coin?.symbol
+            if (!['PLS', 'WPLS', 'PLSX', 'INC', 'HEX'].includes(symbol)) return acc
+
+            if (symbol === 'WPLS' && acc.PLS) {
+                return acc
+            }
+
+            const normalizedSymbol = symbol === 'WPLS' ? 'PLS' : symbol
+
+            acc[normalizedSymbol] = {
+                '1H': Number(coin?.percent1h),
+                '6H': Number(coin?.percent6h),
+                '24H': Number(coin?.percent24h),
+                '7D': Number(coin?.percent7d),
+                '30D': Number(coin?.percent30d)
+            }
+
+            return acc
+        }, {})
+
+            if (rebuilt?.PLS) {
+                try {
+                    localStorage.setItem('pulsePercentOverrides', JSON.stringify(rebuilt))
+                } catch {}
+            }
+
+            return Object.keys(rebuilt).length > 0 ? rebuilt : parsedOverrides
+        } catch {
+            return {}
+        }
+    })
 
     const priceArray = Object.keys(prices)
     const pricesLoaded = priceArray.length > 0
@@ -119,6 +173,7 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
 
     const hexPrice = (prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']?.priceUsd ?? 0)
     const stakesUsdValue = (stakeStats?.totalFinalHex ?? 0) * hexPrice
+    const incPriceUsd = Number(prices?.['0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d']?.priceUsd ?? 0)
 
     const grandTotal = parseFloat(parseFloat(hideHexMiners ? 0 : stakesUsdValue) + parseFloat(addressBalances ?? 0) + parseFloat(addressFarms ?? 0) + parseFloat(addressLps ?? 0) ).toFixed(2)
     const loading = balanceData?.loading || farmData?.loading || lpData?.loading
@@ -127,9 +182,120 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
         Farms: farmData?.loading,
         'Liquidity Pools': lpData?.loading
     }
+    const [incPerDay, setIncPerDay] = useState(() => {
+    return Number(localStorage.getItem('incPerDay') ?? 0)
+    })
 
-    const incRewards = addressFarmRewards?.normalized && addressFarmRewards?.normalized > 0.01
-    const hasHexStakes = hexData?.combinedStakes.length > 0
+    useEffect(() => {
+        const fetchPulseMetrics = async () => {
+            try {
+                const raw = await window.electron.getFile("https://pulsecoinlist.com/stats")
+
+                const payload =
+                    typeof raw === 'string'
+                        ? JSON.parse(raw)
+                        : raw
+
+                const rows =
+                    Array.isArray(payload?.pageProps?.topCoinsMetrics) ? payload.pageProps.topCoinsMetrics :
+                    Array.isArray(payload?.topCoinsMetrics) ? payload.topCoinsMetrics :
+                    Array.isArray(payload) ? payload :
+                    []
+
+                console.log("PULSE METRICS NORMALIZED:", rows)
+
+                console.log(
+                    "PULSE METRICS SYMBOLS:",
+                    rows.map(r => r.symbol)
+                    )
+
+                if (Array.isArray(rows) && rows.length > 0) {
+                    setPulseMetrics(rows)
+
+                    const mapped = rows.reduce((acc, coin) => {
+                    const symbol = coin?.symbol
+                    if (!['PLS', 'WPLS', 'PLSX', 'INC', 'HEX'].includes(symbol)) return acc
+
+                    if (symbol === 'WPLS' && acc.PLS) {
+                        return acc
+                    }
+
+                    const normalizedSymbol = symbol === 'WPLS' ? 'PLS' : symbol
+
+                    acc[normalizedSymbol] = {
+                        '1H': Number(coin?.percent1h),
+                        '6H': Number(coin?.percent6h),
+                        '24H': Number(coin?.percent24h),
+                        '7D': Number(coin?.percent7d),
+                        '30D': Number(coin?.percent30d)
+                    }
+
+                    return acc
+                }, {})
+
+                    setCachedPulseOverrides(mapped)
+
+                    try {
+                        localStorage.setItem('pulseMetrics', JSON.stringify(rows))
+                        localStorage.setItem('pulsePercentOverrides', JSON.stringify(mapped))
+                    } catch (err) {
+                        console.warn('Failed to cache pulse metrics', err)
+                    }
+                } else {
+                    console.warn('Pulse metrics fetch returned empty rows, keeping cached values')
+                }
+            } catch (err) {
+                console.error("PulseCoinList fetch failed", err)
+                setPulseMetrics(prev => Array.isArray(prev) ? prev : [])
+            }
+        }
+
+        fetchPulseMetrics()
+    }, [])
+
+    const incUsdPerDay = incPerDay * incPriceUsd
+    const prevIncRef = useRef(
+    Number(localStorage.getItem('prevInc') ?? null)
+    )
+
+    const prevTimeRef = useRef(
+    Number(localStorage.getItem('prevTime') ?? null)
+    )
+
+    useEffect(() => {
+    if (!addressFarmRewards?.raw) return
+
+  const currentInc = Number(addressFarmRewards.normalized ?? 0)
+  const now = Date.now()
+
+  if (prevIncRef.current !== null && prevTimeRef.current !== null) {
+  const deltaInc = currentInc - prevIncRef.current
+  const deltaTime = (now - prevTimeRef.current) / 1000
+
+  if (deltaTime >= 300 && deltaInc > 0) {
+    const perSecond = deltaInc / deltaTime
+    const perDay = perSecond * 86400
+
+    setIncPerDay(prev => {
+      const newValue = prev === 0 ? perDay : (prev * 0.8 + perDay * 0.2)
+  localStorage.setItem('incPerDay', Number(newValue.toFixed(6)))
+  return newValue
+})
+
+    prevIncRef.current = currentInc
+    prevTimeRef.current = now
+    localStorage.setItem('prevInc', currentInc)
+    localStorage.setItem('prevTime', now)
+  }
+} else {
+  prevIncRef.current = currentInc
+  prevTimeRef.current = now
+  localStorage.setItem('prevInc', currentInc)
+  localStorage.setItem('prevTime', now)
+}
+}, [addressFarmRewards?.raw])
+const incRewards = addressFarmRewards?.normalized && addressFarmRewards?.normalized > 0.01
+const hasHexStakes = hexData?.combinedStakes.length > 0
 
     return <Wrapper>
         {pricesLoaded ? <div>
@@ -164,7 +330,12 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
                 </Tooltip>
             </div>
             <div style={{ marginTop: 70, marginBottom: 50 }}>
-                <PricesComponentV2 historyData={historyData} priceData={priceData} getImage={getImage}/>
+                <PricesComponentV2
+                    historyData={historyData}
+                    priceData={priceData}
+                    getImage={getImage}
+                    pulseMetrics={Array.isArray(pulseMetrics) && pulseMetrics.length > 0 ? pulseMetrics : cachedPulseOverrides}
+                />
             </div>
             {hasHexStakes ? <div>
                 <StakeComponent visibleWallets={visibleWallets} disabled={hideHexMiners} hexData={hexData} hexPrice={prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} hiddenWallets={hiddenWallets}/>
@@ -221,10 +392,15 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
                                 {incRewards ? <div>
                                     <Tooltip content="PulseX Farm Rewards">
                                         {addressFarmRewards?.normalized < 100_000 
-                                            ? addCommasToNumber(parseFloat(addressFarmRewards?.normalized).toFixed(2))
-                                            : fUnit( parseFloat(addressFarmRewards?.normalized), 2)
+                                            ? addCommasToNumber(parseFloat(addressFarmRewards?.normalized).toFixed(3))
+                                            : fUnit( parseFloat(addressFarmRewards?.normalized), 3)
                                         } <Icon icon={icons_list.farm} size={15}/>
                                     </Tooltip>
+                                    <div style={{ fontSize: 12, opacity: 0.8 }}>
+                                            ~ {Number.isFinite(incPerDay) ? incPerDay.toFixed(2) : '0.00'} INC/day
+                                            {' '}
+                                            ($ {Number.isFinite(incUsdPerDay) ? addCommasToNumber(incUsdPerDay.toFixed(2)) : '0.00'}/day)
+                                    </div>
                                 </div> : ''}
                             <div/>
                         </div>

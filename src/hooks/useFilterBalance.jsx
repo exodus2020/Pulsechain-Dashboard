@@ -89,8 +89,9 @@ export default function useFilterBalance({ balanceData, farmData, lpData, hidden
         }, 0)
 
         const addressFarmRewards = Object.values(farm ?? {}).reduce((acc, farm) => {
-            acc.usd = (acc?.usd ?? 0) + (farm?.rewards?.usd ?? 0)
-            acc.normalized = parseFloat((acc?.normalized ?? 0)) + parseFloat((farm?.rewards?.normalized ?? 0))
+            acc.usd = (acc.usd ?? 0) + (farm?.rewards?.usd ?? 0)
+            acc.normalized = (acc.normalized ?? 0) + (farm?.rewards?.normalized ?? 0)
+            acc.raw = (BigInt(acc.raw ?? 0) + BigInt(farm?.rewards?.raw ?? 0)).toString()
 
             return acc
         }, {})

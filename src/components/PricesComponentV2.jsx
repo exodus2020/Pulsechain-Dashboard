@@ -1,4 +1,5 @@
-import { memo, useCallback, useMemo, useState } from "react"
+// PricesComponentV2.jsx
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import styled from "styled-components"
 
 import ImageContainer from "./ImageContainer"
@@ -8,7 +9,6 @@ import ImgHEX from '../icons/hex.png'
 import ImgINC from '../icons/inc.png'
 import { formatNumber, fUnit } from "../lib/numbers"
 import { Selector } from "./Selector"
-import LoadingWave from "./LoadingWave"
 import Tooltip from "../shared/Tooltip"
 import { LoadingBar } from "./LoadingBar"
 import { useAtom } from "jotai"
@@ -105,8 +105,8 @@ const Row = styled.div`
 `
 
 export default memo(PricesComponentV2)
-function PricesComponentV2 ({ historyData, priceData, getImage }) {
-    const { history, resetHistory, chartKeyPoints } = historyData
+function PricesComponentV2 ({ historyData, priceData, statsData, getImage, pulseMetrics }) {
+    const { history, resetHistory, chartKeyPoints, dailyCandles } = historyData
     const { prices } = priceData
     // const getImageMemo = useCallback(getImage ?? (() => {}), []);
 
@@ -118,29 +118,36 @@ function PricesComponentV2 ({ historyData, priceData, getImage }) {
     const hexPrice = prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']
     const incPrice = prices?.['0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d']
 
-    //const plsHistory = history?.[priceData?.bestStable?.pair] ?? []
-    const plsHistory = chartKeyPoints?.[priceData?.bestStable?.pair] ?? []
+    const plsFullHistory = history?.[priceData?.bestStable?.pair] ?? []
+    const plsShortHistory = chartKeyPoints?.[priceData?.bestStable?.pair] ?? []
+
+    const plsIntradayHistory = plsShortHistory?.length ? plsShortHistory : plsFullHistory
+    const plsLongRangeHistory = plsFullHistory ?? []
+    
     const invert = priceData?.bestStable?.invert ? true : false
 
     const displayArray = useMemo(() => [
-        {
+    {
             'name': 'PLS',
             'price': plsPrice?.priceUsd,
             'priceWPLS': plsPrice?.priceWpls,
-            'history': plsHistory,
+            'history': plsIntradayHistory,
+            'longHistory': plsLongRangeHistory,
+            'candleKey': priceData?.bestStable?.pair,
             'tokenInfo': plsPrice,
             'lows': {
-                'price': 0.00001654,
-                'priceWPLS': 0.00001654,
+                'price': 0.000009536,
+                'priceWPLS': 0.000009536,
             },
             'image': ImgPLS,
             'isPls': true,
             'bestStable': priceData?.bestStable,
             'invert': invert
-        },    
-        {
+},  
+    {
             'name': 'PLSX',
             'tokenInfo': plsxPrice,
+            'candleKey': '0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9',
             'price': plsxPrice?.priceUsd,
             'priceWPLS': plsxPrice?.priceWpls,
             'history': chartKeyPoints?.['0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9'] ?? [],
@@ -156,6 +163,7 @@ function PricesComponentV2 ({ historyData, priceData, getImage }) {
             'price': incPrice?.priceUsd,
             'priceWPLS': incPrice?.priceWpls,
             'history': chartKeyPoints?.['0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa'] ?? [],
+            'candleKey': '0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa',
             'tokenInfo': incPrice,
             'lows': {
                 'price': 0.3947,
@@ -168,7 +176,8 @@ function PricesComponentV2 ({ historyData, priceData, getImage }) {
             'name': 'HEX',
             'price': hexPrice?.priceUsd,
             'priceWPLS': hexPrice?.priceWpls,
-            'history': chartKeyPoints?.['0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65'] ?? [],
+            'history': chartKeyPoints?.[hexPrice?.pairId] ?? [],
+            'candleKey': hexPrice?.pairId,
             'tokenInfo': hexPrice,
             'lows': {
                 'price': 0.003633,
@@ -176,42 +185,130 @@ function PricesComponentV2 ({ historyData, priceData, getImage }) {
             },
             'image': ImgHEX,
             'bestStable': priceData?.bestStable
-        },
-    ], [prices, history, getImage])
+},
+    ], [prices, history, chartKeyPoints, plsPrice, plsxPrice, hexPrice, incPrice, priceData?.bestStable, getImage])
 
     const favoriteDisplayArray = []
-    // const favoriteDisplayArray = useMemo(() => [
-    //     "0x02dcdd04e3f455d838cd1249292c58f3b79e3c3c",
-    // ].map(address => {
-    //     const data = prices?.[address]
-    //     if (!data) return null
-    //     return {
-    //         'name': data?.symbol,
-    //         'price': data?.priceUsd,
-    //         'priceWPLS': data?.priceWpls,
-    //         'history': history?.[data?.pairId] ?? [],
-    //         'tokenInfo': prices?.[address],
-    //         'lows': {
-    //             'price': parseFloat(data?.priceUsd).toFixed(7),
-    //             'priceWPLS': parseFloat(data?.priceWpls).toFixed(7),
-    //         },
-    //         'image': getImageMemo(address)
-    //     }
-    // }), [prices, history, getImageMemo])
+
+    const pulseCoinListPercents = useMemo(() => {
+        if (!pulseMetrics) return {}
+
+        if (!Array.isArray(pulseMetrics) && typeof pulseMetrics === 'object') {
+            return pulseMetrics
+        }
+
+        const metrics = pulseMetrics ?? []
+        const wantedSymbols = new Set(['PLS', 'WPLS', 'PLSX', 'INC', 'HEX'])
+
+        const mapped = metrics.reduce((acc, coin) => {
+        const symbol = coin?.symbol
+        if (!wantedSymbols.has(symbol)) return acc
+
+        if (symbol === 'WPLS' && acc.PLS) {
+            return acc
+        }
+
+        const normalizedSymbol = symbol === 'WPLS' ? 'PLS' : symbol
+
+        acc[normalizedSymbol] = {
+            '1H': Number(coin?.percent1h),
+            '6H': Number(coin?.percent6h),
+            '24H': Number(coin?.percent24h),
+            '7D': Number(coin?.percent7d),
+            '30D': Number(coin?.percent30d)
+        }
+
+        return acc
+    }, {})
+
+        return mapped
+    }, [pulseMetrics])
     
+    const lastGoodPercentOverridesRef = useRef({})
+
+    useEffect(() => {
+        if (Object.keys(pulseCoinListPercents).length > 0) {
+            lastGoodPercentOverridesRef.current = pulseCoinListPercents
+        }
+    }, [pulseCoinListPercents])
+
+    const effectivePercentOverrides =
+        Object.keys(pulseCoinListPercents).length > 0
+            ? pulseCoinListPercents
+            : lastGoodPercentOverridesRef.current
+
     const historyProperty = invert ? 'priceInverted' : 'price'
+    const plsHistoryProperty = (() => {
+    const latest = plsIntradayHistory?.[plsIntradayHistory.length - 1]
+    const current = Number(plsPrice?.priceUsd)
 
-    // const plsLastPrice = plsHistory && plsHistory.length > 1 ? plsHistory[plsHistory.length - 1][historyProperty] : 0
-    // const plsLastHourPrice = plsHistory && plsHistory.length > 1 ? plsHistory[plsHistory.length - 2][historyProperty] : 0
-    // const plsLastSixHourPrice = plsHistory && plsHistory.length > 1 ? plsHistory[plsHistory.length - 6][historyProperty] : 0
-    // const plsLastDayPrice = plsHistory && plsHistory.length > 1 ? plsHistory[plsHistory.length - 24][historyProperty] : 0
-    // const plsSevenDayPrice = plsHistory && plsHistory.length > 1 ? plsHistory[plsHistory.length - (24 * 7)][historyProperty] : 0
+    const direct = Number(latest?.price)
+    const inverted = Number(latest?.priceInverted)
 
-    const plsLastPrice = plsHistory && plsHistory.length > 1 ? plsHistory[plsHistory.length - 1][historyProperty] : 0
-    const plsLastHourPrice = plsHistory && plsHistory.length > 1 ? plsHistory[plsHistory.length - 2][historyProperty] : 0
-    const plsLastSixHourPrice = plsHistory && plsHistory.length > 2 ? plsHistory[plsHistory.length - 3][historyProperty] : 0
-    const plsLastDayPrice = plsHistory && plsHistory.length > 3 ? plsHistory[plsHistory.length - 4][historyProperty] : 0
-    const plsSevenDayPrice = plsHistory && plsHistory.length > 4 ? plsHistory[plsHistory.length - 5][historyProperty] : 0
+    const directDiff =
+        Number.isFinite(direct) && direct > 0 && Number.isFinite(current) && current > 0
+            ? Math.abs(Math.log(direct / current))
+            : Infinity
+
+    const invertedDiff =
+        Number.isFinite(inverted) && inverted > 0 && Number.isFinite(current) && current > 0
+            ? Math.abs(Math.log(inverted / current))
+            : Infinity
+
+    return directDiff <= invertedDiff ? 'price' : 'priceInverted'
+})()
+
+    const plsWplsHistoryProperty = plsHistoryProperty
+
+    const plsLastPrice = plsIntradayHistory && plsIntradayHistory.length > 1 ? plsIntradayHistory[plsIntradayHistory.length - 1][plsHistoryProperty] : 0
+    const plsLastHourPrice = getHistoryValueNearHoursAgo(
+        plsIntradayHistory,
+        plsHistoryProperty,
+        1,
+        false,
+        1
+    )
+
+    const plsLastSixHourPrice = getHistoryValueNearHoursAgo(
+        plsIntradayHistory,
+        plsHistoryProperty,
+        6,
+        false,
+        1
+    )
+
+    const plsLastDayPrice = getHistoryValueNearHoursAgo(
+        plsIntradayHistory,
+        plsHistoryProperty,
+        24,
+        false,
+        1
+    )
+
+    const plsSevenDayPrice = getHistoryValueNearDaysAgo(
+        plsIntradayHistory,
+        plsHistoryProperty,
+        7,
+        false,
+        1
+    )
+
+    const plsThirtyDayPrice = getHistoryValueNearDaysAgo(
+        plsLongRangeHistory,
+        plsHistoryProperty,
+        30,
+        false,
+        1
+    )
+
+    const plsThirtyDayAnchorPrice = getHistoryValueNearDaysAgo(
+        plsIntradayHistory,
+        plsHistoryProperty,
+        30,
+        false,
+        1
+    )
+
     const plsAllTimeLowPrice = 0.000009536
 
     const priceComparison = {
@@ -220,10 +317,11 @@ function PricesComponentV2 ({ historyData, priceData, getImage }) {
         plsLastHourPrice,
         plsLastPrice,
         plsLastSixHourPrice,
+        plsThirtyDayPrice: plsThirtyDayPrice || plsThirtyDayAnchorPrice,
         plsAllTimeLowPrice
     }
 
-    const isLoading = plsHistory.length === 0
+    const isLoading = false
 
     // const test = calculatePercentages(plsxPrice, plsHistory, chartKeyPoints?.['0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9'] ?? [], priceData?.bestStable, false)
     // console.log(plsxPrice, plsHistory, chartKeyPoints?.['0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9'] ?? [], priceData?.bestStable, false)
@@ -231,22 +329,56 @@ function PricesComponentV2 ({ historyData, priceData, getImage }) {
 
     return <Wrapper>
         <div style={{position: 'absolute', top: -50, right: '50%', overflow: 'hidden', whiteSpace: 'nowrap', transform: 'scale(0.9) translateX( calc( 50% / 0.9 ) )'}} className="mobile-only">
-            <Selector options={['1H', '6H', '24H', '7D','ATL']} value={selected} onChange={setSelected} />
+            <Selector options={['1H', '6H', '24H', '7D','30D']} value={selected} onChange={setSelected} />
             <Selector options={['WPLS', 'USD', 'X']} value={selectedCurrency} onChange={setSelectedCurrency} />
         </div>
         <div style={{marginBottom: 10, position: 'relative', marginTop: 40}}>
             <div style={{position: 'absolute', top: -50, right: 0}} className="desktop-only">
-                <Selector options={['1H', '6H', '24H', '7D','ATL']} value={selected} onChange={setSelected} />
+                <Selector options={['1H', '6H', '24H', '7D','30D']} value={selected} onChange={setSelected} />
                 <Selector options={['WPLS', 'USD', 'X']} value={selectedCurrency} onChange={setSelectedCurrency} />
             </div>
         </div>
         <div className="price-grid">
             {displayArray.map((item, index) => {
-                return <PriceRow isLoading={isLoading} key={index} {...item} priceComparison={priceComparison} selected={selected} selectedCurrency={selectedCurrency} resetHistory={resetHistory}/>
-            })}
+            return <PriceRow 
+                isLoading={isLoading}
+                key={index}
+                {...item}
+                longHistory={item.longHistory}
+                statsData={statsData}
+                priceComparison={priceComparison}
+                selected={selected}
+                selectedCurrency={selectedCurrency}
+                resetHistory={resetHistory}
+                dailyCandles={dailyCandles}
+                historyPropertyOverride={
+                    item.name === 'PLS'
+                        ? (selectedCurrency === 'WPLS' ? plsWplsHistoryProperty : plsHistoryProperty)
+                        : undefined
+                }
+                percentOverrides={effectivePercentOverrides?.[item.name] ?? null}
+            />
+        })}
 
             {favoriteDisplayArray.map((item, index) => {
-                return <PriceRow isLoading={isLoading} key={index} {...item} priceComparison={priceComparison} selected={selected} selectedCurrency={selectedCurrency} resetHistory={resetHistory}/>
+                return <PriceRow 
+                    isLoading={isLoading}
+                    key={index}
+                    {...item}
+                    longHistory={item.longHistory}
+                    statsData={statsData}
+                    priceComparison={priceComparison}
+                    selected={selected}
+                    selectedCurrency={selectedCurrency}
+                    resetHistory={resetHistory}
+                    dailyCandles={dailyCandles}
+                    historyPropertyOverride={
+                        item.name === 'PLS'
+                            ? (selectedCurrency === 'WPLS' ? plsWplsHistoryProperty : plsHistoryProperty)
+                            : undefined
+                    }
+                    percentOverrides={effectivePercentOverrides?.[item.name] ?? null}
+                />
             })}
         </div>
     </Wrapper>
@@ -272,10 +404,46 @@ function calculateTokenPrice (tokenPrice, plsHistory, tokenHistory, bestStable, 
     const usdSelected = selectedCurrency == 'USD'
 
     const plsLastPrice = plsHistory && plsHistory.length > 1 ? plsHistory[plsHistory.length - 1][historyProperty] : 0
-    const plsLastHourPrice = plsHistory && plsHistory.length > 1 ? plsHistory[plsHistory.length - 2][historyProperty] : 0
-    const plsLastSixHourPrice = plsHistory && plsHistory.length > 2 ? plsHistory[plsHistory.length - 3][historyProperty] : 0
-    const plsLastDayPrice = plsHistory && plsHistory.length > 3 ? plsHistory[plsHistory.length - 4][historyProperty] : 0
-    const plsSevenDayPrice = plsHistory && plsHistory.length > 4 ? plsHistory[plsHistory.length - 5][historyProperty] : 0
+    const plsLastHourPrice = getHistoryValueNearHoursAgo(
+        plsHistory,
+        historyProperty,
+        1,
+        false,
+        1
+    )
+
+    const plsLastSixHourPrice = getHistoryValueNearHoursAgo(
+        plsHistory,
+        historyProperty,
+        6,
+        false,
+        1
+    )
+
+    const plsLastDayPrice = getHistoryValueNearHoursAgo(
+        plsHistory,
+        historyProperty,
+        24,
+        false,
+        1
+    )
+
+    const plsSevenDayPrice = getHistoryValueNearDaysAgo(
+        plsHistory,
+        historyProperty,
+        7,
+        false,
+        1
+    )
+
+    const plsThirtyDayPrice = getHistoryValueNearDaysAgo(
+        plsHistory,
+        historyProperty,
+        30,
+        false,
+        1
+    )
+
     const plsAllTimeLowPrice = 0.000009536
 
     const plsPriceHistory = {
@@ -284,8 +452,9 @@ function calculateTokenPrice (tokenPrice, plsHistory, tokenHistory, bestStable, 
         plsLastHourPrice,
         plsLastPrice,
         plsLastSixHourPrice,
+        plsThirtyDayPrice,
         plsAllTimeLowPrice
-    }
+}
     
     const priceModifier = (property) => isTokenPls ? 1 : plsPriceHistory[property]
 
@@ -294,34 +463,57 @@ function calculateTokenPrice (tokenPrice, plsHistory, tokenHistory, bestStable, 
     const priceWpls = typeof tokenPrice?.priceWpls === 'number' ? tokenPrice?.priceWpls : parseFloat(tokenPrice?.priceWpls)
     const priceUsd = typeof tokenPrice?.priceUsd === 'number' ? tokenPrice?.priceUsd : parseFloat(tokenPrice?.priceUsd)
 
-    const h1token = usdSelected 
-        ? (tokenHistory && tokenHistory.length > 1 ? tokenHistory[tokenHistory.length - 2][priceProperty] * priceModifier('plsLastHourPrice') : '-')
-        : (tokenHistory && tokenHistory.length > 1 ? tokenHistory[tokenHistory.length - 2][priceProperty] : '-')
-    const h6token = usdSelected 
-        ? (tokenHistory && tokenHistory.length > 2 ? tokenHistory[tokenHistory.length - 3][priceProperty] * priceModifier('plsLastSixHourPrice') : '-')
-        : (tokenHistory && tokenHistory.length > 2 ? tokenHistory[tokenHistory.length - 3][priceProperty] : '-')
-    const d1token = usdSelected 
-        ? (tokenHistory && tokenHistory.length > 3 ? tokenHistory[tokenHistory.length - 4][priceProperty] * priceModifier('plsLastDayPrice') : '-')
-        : (tokenHistory && tokenHistory.length > 3 ? tokenHistory[tokenHistory.length - 4][priceProperty] : '-')
-    const d7token = usdSelected 
-        ? (tokenHistory && tokenHistory.length > 4 ? tokenHistory[tokenHistory.length - 5][priceProperty] * priceModifier('plsSevenDayPrice') : '-')
-        : (tokenHistory && tokenHistory.length > 4 ? tokenHistory[tokenHistory.length - 5][priceProperty] : '-')
-    const allTimeLowPrice = !lows ? NaN : usdSelected ? lows?.price : lows?.priceWPLS
+    const h1token = getHistoryValueNearHoursAgo(
+        tokenHistory,
+        priceProperty,
+        1,
+        usdSelected,
+        usdSelected ? priceModifier('plsLastHourPrice') : 1
+    )
 
+    const h6token = getHistoryValueNearHoursAgo(
+    tokenHistory,
+    priceProperty,
+    6,
+    usdSelected,
+    usdSelected ? priceModifier('plsLastSixHourPrice') : 1
+)
+
+    const d1token = getHistoryValueNearHoursAgo(
+    tokenHistory,
+    priceProperty,
+    24,
+    usdSelected,
+    usdSelected ? priceModifier('plsLastDayPrice') : 1
+)
+    const d7token = getHistoryValueNearDaysAgo(
+        tokenHistory,
+        priceProperty,
+        7,
+        usdSelected,
+        usdSelected ? priceModifier('plsSevenDayPrice') : 1
+    )
+    const d30token = getHistoryValueNearDaysAgo(
+        tokenHistory,
+        priceProperty,
+        30,
+        usdSelected,
+        priceModifier('plsThirtyDayPrice')
+    )
     const tokenPriceHistory = {
         h1token,
         h6token,
         d1token,
         d7token,
-        allTimeLowPrice
+        d30token
     }
 
     //const lastPrice = isTokenPls ? (!invert ? 1 / priceWpls : priceUsd) : usdSelected ? (invert ? priceWpls : priceUsd) : (invert ? priceUsd : priceWpls)
-    const lastPrice = isTokenPls 
-        ? (!invert ? 1 / priceWpls : priceUsd)  // For PLS token
-        : usdSelected 
-            ? (invertReserves ? priceWpls : priceUsd)   // For USD display
-            : (invertReserves ? priceUsd : priceWpls)   // For WPLS display
+    const lastPrice = isTokenPls
+        ? (usdSelected ? priceUsd : priceWpls)
+        : usdSelected
+            ? (invertReserves ? priceWpls : priceUsd) // For USD display
+            : (invertReserves ? priceUsd : priceWpls) // For WPLS display
     
     const priceToUse = usdSelected ? priceUsd : priceWpls
     const displayPrice = priceToUse > 999_999 ? fUnit(priceToUse, 2) : formatNumber(priceToUse ?? 0, true, false)
@@ -335,17 +527,23 @@ function calculateTokenPrice (tokenPrice, plsHistory, tokenHistory, bestStable, 
     // }
 
     const getPercentChange = (selected) => {
-        if (selected === 'ATL' && !lows) return undefined
+        const changeDenominator =
+            selected === '1H' ? h1token :
+            selected === '6H' ? h6token :
+            selected === '24H' ? d1token :
+            selected === '7D' ? d7token :
+            selected === '30D' ? d30token :
+            lastPrice
 
-        const changeDenominator = selected === '1H' ? h1token : selected === '6H' ? h6token : selected === '24H' ? d1token : selected === '7D' ? d7token : selected === 'ATL' ? allTimeLowPrice : lastPrice
-        const percentPrice = selected === 'ATL' ? (usdSelected ? priceUsd : priceWpls) : lastPrice
+        const percentPrice = lastPrice
         
         // const percentChangeRaw = 
         //     selectedCurrency === 'X' ? (percentPrice / changeDenominator)
         //     : (percentPrice / changeDenominator - 1) * 100
-        const percentChangeRaw = 
-            selectedCurrency === 'X' ? (percentPrice / changeDenominator)
-            : ((percentPrice - changeDenominator) / changeDenominator) * 100
+        const percentChangeRaw =
+            selectedCurrency === 'X'
+                ? (percentPrice / changeDenominator)
+                : ((percentPrice - changeDenominator) / changeDenominator) * 100
         const percentChange = percentChangeRaw < 0.05 && percentChangeRaw > -0.05 ? 0 : percentChangeRaw
         const isX = selectedCurrency === 'X'
         const percentChangeColor = (!isX && percentChange > 0.75) || (isX && percentChange > 1.03) ? 'rgb(130,255,130)' : (!isX && percentChange < -0.75) || (isX && percentChange < 0.97) ? 'rgb(255,130,130)' : 'rgb(170,170,170)'
@@ -376,48 +574,380 @@ function calculateTokenPrice (tokenPrice, plsHistory, tokenHistory, bestStable, 
             h6: getPercentChange('6H'),
             d1: getPercentChange('24H'),
             d7: getPercentChange('7D'),
-            atl: getPercentChange('ATL')
+            d30: getPercentChange('30D')
         }
     }
 }
+function getHistoryValueNearDaysAgo(history, priceProperty, daysAgo, usdSelected, priceModifier) {
+    if (!Array.isArray(history) || history.length === 0) return 0
 
-function PriceRow({ tokenInfo, resetHistory, isLoading, invert = false, name, price, priceWPLS, history, priceComparison, image, isPls = false, selected, selectedCurrency, lows, bestStable }) {
-    const [ singleTokenModal, setSingleTokenModal ] = useAtom(tokenModalAtom)
+    const latestTimestamp = Number(history[history.length - 1]?.timestamp)
+    if (!Number.isFinite(latestTimestamp) || latestTimestamp <= 0) return 0
+
+    const targetTime = latestTimestamp - (daysAgo * 24 * 60 * 60 * 1000)
+
+    let closest = null
+    let smallestDiff = Infinity
+
+    for (const item of history) {
+        if (!item?.timestamp) continue
+
+        const diff = Math.abs(item.timestamp - targetTime)
+
+        if (diff < smallestDiff) {
+            smallestDiff = diff
+            closest = item
+        }
+    }
+
+    if (!closest) return 0
+
+    const raw =
+        Number(closest?.[priceProperty]) ||
+        Number(closest?.value) ||
+        Number(closest?.close) ||
+        0
+
+    if (!Number.isFinite(raw) || raw <= 0) return 0
+
+    return usdSelected ? raw * priceModifier : raw
+}
+function getHistoryValueNearHoursAgo(history, priceProperty, hoursAgo, usdSelected, priceModifier) {
+    if (!Array.isArray(history) || history.length === 0) return 0
+
+    const anchor = Number(history[history.length - 1]?.timestamp)
+    if (!Number.isFinite(anchor)) return 0
+
+    const targetTime = anchor - (hoursAgo * 60 * 60 * 1000)
+
+    let closest = null
+    let smallestDiff = Infinity
+
+    for (const item of history) {
+        if (!item?.timestamp) continue
+
+        const diff = Math.abs(item.timestamp - targetTime)
+
+        if (diff < smallestDiff) {
+            smallestDiff = diff
+            closest = item
+        }
+    }
+
+    if (!closest) return 0
+
+    const raw =
+        Number(closest?.[priceProperty]) ||
+        Number(closest?.value) ||
+        Number(closest?.close) ||
+        0
+
+    if (!Number.isFinite(raw) || raw <= 0) return 0
+
+    return usdSelected ? raw * priceModifier : raw
+}
+function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = false, name, price, priceWPLS, history, longHistory, priceComparison, image, isPls = false, selected, selectedCurrency, lows, bestStable, dailyCandles, candleKey, historyPropertyOverride, percentOverrides }) {    
+    const frozenDenominatorRef = useRef({})
+    
     const priceModifier = (property) => isPls ? 1 : priceComparison[property]
 
-    const priceProperty = invert ? 'priceInverted' : 'price'
-    const usdSelected = selectedCurrency === 'USD' || selectedCurrency === 'X'
+    const priceProperty = isPls
+        ? (historyPropertyOverride ?? (invert ? 'priceInverted' : 'price'))
+        : (tokenInfo?.invertReserves ? 'priceInverted' : 'price')
 
+    const usdSelected = selectedCurrency === 'USD' || selectedCurrency === 'X'
+    const isPlsWplsMode = isPls && selectedCurrency === 'WPLS'
+    const isX = selectedCurrency === 'X'
     const bestStableToken = bestStable?.symbol ?? ''
 
-    const lastPrice = isPls ? (!invert ? 1 / priceWPLS : price)
-        : usdSelected ? (invert ? priceWPLS : price) : (invert ? price : priceWPLS)
-    const lastHourPrice = usdSelected 
-        ? (history && history.length > 1 ? history[history.length - 2][priceProperty] * priceModifier('plsLastHourPrice') : '-')
-        : (history && history.length > 1 ? history[history.length - 2][priceProperty] : '-')
-    const lastSixHourPrice = usdSelected 
-        ? (history && history.length > 2 ? history[history.length - 3][priceProperty] * priceModifier('plsLastSixHourPrice') : '-')
-        : (history && history.length > 2 ? history[history.length - 3][priceProperty] : '-')
-    const lastDayPrice = usdSelected 
-        ? (history && history.length > 3 ? history[history.length - 4][priceProperty] * priceModifier('plsLastDayPrice') : '-')
-        : (history && history.length > 3 ? history[history.length - 4][priceProperty] : '-')
-    const sevenDayPrice = usdSelected 
-        ? (history && history.length > 4 ? history[history.length - 5][priceProperty] * priceModifier('plsSevenDayPrice') : '-')
-        : (history && history.length > 4 ? history[history.length - 5][priceProperty] : '-')
-    const allTimeLowPrice = usdSelected ? lows?.price : lows?.priceWPLS
+    const lastPrice = isPlsWplsMode
+        ? 1
+        : isPls
+            ? price
+            : usdSelected
+                ? price
+                : priceWPLS
 
-    const priceToUse = usdSelected ? price : priceWPLS
+    const lastHourPrice = isPlsWplsMode
+        ? 1
+        : getHistoryValueNearHoursAgo(
+            history,
+            priceProperty,
+            1,
+            usdSelected,
+            usdSelected ? priceModifier('plsLastHourPrice') : 1
+        )
+
+    const lastSixHourPrice = isPlsWplsMode
+        ? 1
+        : getHistoryValueNearHoursAgo(
+            history,
+            priceProperty,
+            6,
+            usdSelected,
+            usdSelected ? priceModifier('plsLastSixHourPrice') : 1
+        )
+
+    const lastDayPrice = isPlsWplsMode
+        ? 1
+        : getHistoryValueNearHoursAgo(
+            history,
+            priceProperty,
+            24,
+            usdSelected,
+            usdSelected ? priceModifier('plsLastDayPrice') : 1
+        )
+
+    const candleData = dailyCandles?.[candleKey]
+
+    const longRangeSource = longHistory?.length ? longHistory : history
+
+    const sevenDaySource = isPls ? history : longRangeSource
+
+    const historySevenDayPrice = isPlsWplsMode
+        ? 1
+        : getHistoryValueNearDaysAgo(
+            sevenDaySource,
+            priceProperty,
+            7,
+            usdSelected,
+            usdSelected ? priceModifier('plsSevenDayPrice') : 1
+        )
+
+    const historyThirtyDayPrice = isPlsWplsMode
+        ? 1
+        : getHistoryValueNearDaysAgo(
+            longRangeSource,
+            priceProperty,
+            30,
+            usdSelected,
+            usdSelected ? priceModifier('plsThirtyDayPrice') : 1
+        )
+
+    const rawSevenDayPrice =
+        candleData?.length
+            ? getHistoryValueNearDaysAgo(
+                candleData,
+                'close',
+                7,
+                false,
+                1
+            )
+            : 0
+
+    const rawThirtyDayPrice =
+        candleData?.length
+            ? getHistoryValueNearDaysAgo(
+                candleData,
+                'close',
+                30,
+                false,
+                1
+            )
+            : 0
+
+    const hasDistinctRawThirtyDayPrice =
+        Number.isFinite(rawThirtyDayPrice) &&
+        rawThirtyDayPrice > 0 &&
+        Number.isFinite(rawSevenDayPrice) &&
+        Math.abs(rawThirtyDayPrice - rawSevenDayPrice) > 1e-12
+
+    const coinStats = statsData?.pageProps?.topCoinsMetrics?.find(c => c.symbol === name)
+
+    const percent7dFromStats = Number(coinStats?.percent7d)
+    const percent30dFromStats = Number(coinStats?.percent30d)
+
+    const fallbackSevenDayPriceUsd =
+        Number.isFinite(percent7dFromStats) && percent7dFromStats !== 0
+            ? price / (1 + percent7dFromStats)
+            : rawSevenDayPrice
+
+    const fallbackThirtyDayPriceUsd =
+        Number.isFinite(percent30dFromStats) && percent30dFromStats !== 0
+            ? price / (1 + percent30dFromStats)
+            : rawThirtyDayPrice
+
+    const fallbackSevenDayPriceWpls =
+        Number.isFinite(fallbackSevenDayPriceUsd) &&
+        fallbackSevenDayPriceUsd > 0 &&
+        Number.isFinite(priceComparison?.plsSevenDayPrice) &&
+        priceComparison.plsSevenDayPrice > 0
+            ? fallbackSevenDayPriceUsd / priceComparison.plsSevenDayPrice
+            : 0
+
+    const fallbackThirtyDayPriceWpls =
+        Number.isFinite(fallbackThirtyDayPriceUsd) &&
+        fallbackThirtyDayPriceUsd > 0 &&
+        Number.isFinite(priceComparison?.plsThirtyDayPrice) &&
+        priceComparison.plsThirtyDayPrice > 0
+            ? fallbackThirtyDayPriceUsd / priceComparison.plsThirtyDayPrice
+            : 0
+
+    const sevenDayPrice = isPlsWplsMode
+        ? 1
+        : isPls
+            ? (historySevenDayPrice || rawSevenDayPrice)
+            : (usdSelected
+                ? (fallbackSevenDayPriceUsd || historySevenDayPrice)
+                : (fallbackSevenDayPriceWpls || historySevenDayPrice))
+
+    const plsHasDistinct30DayHistory =
+        Number.isFinite(historyThirtyDayPrice) &&
+        historyThirtyDayPrice > 0 &&
+        Number.isFinite(historySevenDayPrice) &&
+        Math.abs(historyThirtyDayPrice - historySevenDayPrice) > 1e-12
+
+    const thirtyDayPrice = isPlsWplsMode
+        ? 1
+        : isPls
+            ? (
+                plsHasDistinct30DayHistory
+                    ? historyThirtyDayPrice
+                    : 0
+            )
+            : (usdSelected
+                ? (fallbackThirtyDayPriceUsd || historyThirtyDayPrice)
+                : (fallbackThirtyDayPriceWpls || historyThirtyDayPrice))
+
+    // removed PLS LONG RANGE DEBUG log
+
+
+    const priceToUse = isPlsWplsMode ? 1 : (usdSelected ? price : priceWPLS)
     const displayPrice = priceToUse > 999_999 ? fUnit(priceToUse, 2) : formatNumber(priceToUse ?? 0, true, false)
 
-    const changeDenominator = selected === '1H' ? lastHourPrice : selected === '6H' ? lastSixHourPrice : selected === '24H' ? lastDayPrice : selected === '7D' ? sevenDayPrice : selected === 'ATL' ? allTimeLowPrice : lastPrice
-    const percentPrice = selected === 'ATL' ? (usdSelected ? price : priceWPLS) : lastPrice
-    const percentChangeRaw = 
-        selectedCurrency === 'X' ? (percentPrice / changeDenominator)
-        : (percentPrice / changeDenominator - 1) * 100
-    const percentChange = percentChangeRaw < 0.05 && percentChangeRaw > -0.05 ? 0 : percentChangeRaw
-    const isX = selectedCurrency === 'X'
-    const percentChangeColor = (!isX && percentChange > 0.75) || (isX && percentChange > 1.03) ? 'rgb(130,255,130)' : (!isX && percentChange < -0.75) || (isX && percentChange < 0.97) ? 'rgb(255,130,130)' : 'rgb(170,170,170)'
-    const percentageUnit = selectedCurrency === 'X' ? 'x' : '%'
+    const overridePercentValue =
+        selectedCurrency === 'USD' && !isX
+            ? percentOverrides?.[selected]
+            : undefined
+
+    const overridePercentRaw = Number(overridePercentValue)
+
+    const hasOverridePercent =
+        overridePercentValue !== undefined &&
+        overridePercentValue !== null &&
+        Number.isFinite(overridePercentRaw) &&
+        !(
+            isPls &&
+            (selected === '7D' || selected === '30D') &&
+            overridePercentRaw <= -0.995
+        )
+
+    const rawChangeDenominator =
+        hasOverridePercent
+            ? lastPrice / (1 + overridePercentRaw)
+            : (
+                selected === '1H' ? lastHourPrice :
+                selected === '6H' ? lastSixHourPrice :
+                selected === '24H' ? lastDayPrice :
+                selected === '7D' ? sevenDayPrice :
+                selected === '30D' ? thirtyDayPrice :
+                lastPrice
+            )
+
+    const rawPercentPrice = Number(lastPrice)
+
+    const freezeKey = `${name}|${selected}|${selectedCurrency}`
+
+    const rawDenominator = Number(rawChangeDenominator)
+
+    if (
+        Number.isFinite(rawDenominator) &&
+        rawDenominator > 0 &&
+        frozenDenominatorRef.current[freezeKey] == null
+    ) {
+        frozenDenominatorRef.current[freezeKey] = rawDenominator
+    }
+
+    const shouldBypassFrozenDenominator =
+        isPls && (selected === '7D' || selected === '30D')
+
+    const denominator = shouldBypassFrozenDenominator
+        ? rawDenominator
+        : (frozenDenominatorRef.current[freezeKey] ?? rawDenominator)
+
+    const percentPrice = rawPercentPrice
+
+    const requiredAnchorProperty =
+        selected === '1H' ? 'plsLastHourPrice' :
+        selected === '6H' ? 'plsLastSixHourPrice' :
+        selected === '24H' ? 'plsLastDayPrice' :
+        selected === '7D' ? 'plsSevenDayPrice' :
+        selected === '30D' ? 'plsThirtyDayPrice' :
+        'plsLastPrice'
+
+    const requiredAnchorValue = Number(priceComparison?.[requiredAnchorProperty])
+
+    const anchorMissingForUsd =
+        usdSelected &&
+        !isPls &&
+        (!Number.isFinite(requiredAnchorValue) || requiredAnchorValue <= 0)
+
+    const invalidDenominator =
+        anchorMissingForUsd ||
+        !history?.length ||
+        !Number.isFinite(denominator) || denominator <= 0 ||
+        !Number.isFinite(percentPrice) || percentPrice <= 0
+
+    const percentChangeRaw = invalidDenominator
+        ? NaN
+        : isX
+            ? (percentPrice / denominator)
+            : ((percentPrice - denominator) / denominator) * 100
+        
+    const showMissingLongRange =
+        selected === '30D' &&
+        !isPlsWplsMode &&
+        !hasOverridePercent &&
+        isPls &&
+        !plsHasDistinct30DayHistory &&
+        (
+            !Number.isFinite(denominator) ||
+            denominator <= 0 ||
+            !Array.isArray(longHistory) ||
+            longHistory.length === 0
+        )
+
+    const percentChange =
+        Number.isFinite(percentChangeRaw) && percentChangeRaw < 0.05 && percentChangeRaw > -0.05
+            ? 0
+            : percentChangeRaw
+
+    const percentChangeColor =
+        (!isX && percentChange > 0.75) || (isX && percentChange > 1.03)
+            ? 'rgb(130,255,130)'
+            : (!isX && percentChange < -0.75) || (isX && percentChange < 0.97)
+                ? 'rgb(255,130,130)'
+                : 'rgb(170,170,170)'
+
+    const percentageUnit = isX ? 'x' : '%'
+
+    // removed ROW OVERRIDE DEBUG log
+
+    const rawDisplayPercentValue = hasOverridePercent ? (overridePercentRaw * 100) : percentChange
+
+    const displayPercentValue = rawDisplayPercentValue
+
+    const displayPercentColor =
+        hasOverridePercent
+            ? (displayPercentValue > 0.75
+                ? 'rgb(130,255,130)'
+                : displayPercentValue < -0.75
+                    ? 'rgb(255,130,130)'
+                    : 'rgb(170,170,170)')
+            : percentChangeColor
+
+    const percentIsReady =
+        hasOverridePercent || Number.isFinite(displayPercentValue)
+
+    const rowIsLoading = !percentIsReady
+
+    const shouldShowPercent =
+        percentIsReady || selected === '30D' || selected === '7D'
+
+    useEffect(() => {
+        frozenDenominatorRef.current = {}
+    }, [selectedCurrency, selected])
+    const hidePercentForPls = false
 
     return <>
         <div style={{ padding: '20px 5px 20px 15px', borderRadius: 10 }}>
@@ -427,95 +957,37 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, invert = false, name, pr
                 </div>
                 <div style={{ position: 'absolute', left: 50, top: 0 }}>
                     {name}
-                    {!isLoading || selected === 'ATL'? <div style={{ position: 'absolute', right: -10, top: 0, transform: 'translateX(100%)' }}>
-                        <span style={{ color: percentChangeColor }}>
-                            {isPls && selected === 'WPLS' ? <></> 
-                                : !isPls || (isPls && usdSelected) ? `${percentChange.toFixed( isX ? 2 : 1 )}${percentageUnit}` : ''}
-                        </span>
-                    </div> : <></>}
-                </div>
-                {isLoading && selected !== 'ATL' ? <div className="loading-container">
-                    <Tooltip content="Loading Historical Data...">
-                        <div className='loading-bar-div'>
-                            <LoadingBar estTime={30} completed={!isLoading}/>
+                    {!hidePercentForPls && shouldShowPercent ? (
+                        <div style={{ position: 'absolute', right: -10, top: 0, transform: 'translateX(100%)' }}>
+                            <span style={{ color: displayPercentColor }}>
+                                {rowIsLoading
+                                    ? ''
+                                    : showMissingLongRange
+                                        ? '--'
+                                        : Number.isFinite(displayPercentValue)
+                                            ? `${displayPercentValue.toFixed(isX ? 2 : 1)}${percentageUnit}`
+                                            : ''}
+                            </span>
                         </div>
-                    </Tooltip>
-                </div> : <></>}
+                    ) : null}
+                </div>
+                    {rowIsLoading ? <div className="loading-container">
+                        <Tooltip content="Loading Historical Data...">
+                            <div className='loading-bar-div'>
+                                <LoadingBar estTime={13} completed={!rowIsLoading}/>
+                            </div>
+                        </Tooltip>
+                    </div> : <></>}
                 <div style={{ position: 'absolute', left: 50, bottom: 0 }}>
                     <div>
                         <span style={{ fontSize: 15, letterSpacing: 1, whiteSpace: 'nowrap' }}>
-                            {usdSelected ? <span style={{ fontSize: 14 }}>$ </span> : ''}{displayPrice ?? '-'}{usdSelected ? '' : <span style={{ fontSize: 12 }}> {isPls ? '/ '+bestStableToken : 'WPLS'}</span>}
+                            {usdSelected ? <span style={{ fontSize: 14 }}>$ </span> : ''}
+                            {displayPrice ?? '-'}
+                            {usdSelected ? '' : <span style={{ fontSize: 12 }}> {isPls ? 'WPLS' : 'WPLS'}</span>}
                         </span>
                     </div>
                 </div>
             </div>
         </div>
-    </>
-    
-    return <>
-        <Row onClick={() => {
-            if (tokenInfo) {
-                setSingleTokenModal(tokenInfo);
-            }
-        }} className="desktop-only">
-            <div style={{ display: 'grid', gridTemplateColumns: '42px 1fr', alignItems: 'center' }}>
-                <div style={{ textAlign: 'center' }}>
-                    <ImageContainer source={image} alt={name} size={40}/><br/>
-                    {name}
-                </div>
-                <div style={{ textAlign: 'right', fontSize: 20 }}>
-                    {isLoading && selected !== 'ATL' ? <span style={{ position: 'absolute', top: 50, right: -20 }}>
-                            <Tooltip content="Loading Historical Data...">
-                                <LoadingWave numDots={8} speed={100}/>
-                            </Tooltip>
-                        </span> : <span style={{ color: percentChangeColor }}>
-                            {percentChange.toFixed( isX ? 2 : 1 )}{percentageUnit}
-                        </span>
-                    }
-                </div>
-            </div>
-            <div style={{marginTop: 10}}>
-                <span style={{ fontSize: 24, letterSpacing: 1 }}>
-                    {usdSelected ? <span style={{ fontSize: 14 }}>$</span> : ''}
-                    {displayPrice}
-                    {usdSelected ? '' : <span style={{ fontSize: 12 }}> WPLS</span>}
-                    <br/>
-                </span>
-            </div>
-        </Row>
-        <Row onClick={() => {
-            if (tokenInfo) {
-                setSingleTokenModal(tokenInfo);
-            }
-        }} className="mobile-only">
-            <div style={{ display: 'grid', gridTemplateColumns: '42px 1fr 1fr', alignItems: 'center' }}>
-                <div style={{ textAlign: 'center' }}>
-                    <ImageContainer source={image} alt={name} size={40}/><br/>
-                    {name}
-                </div>
-                <div style={{ textAlign: 'center', paddingTop: 10, transform: 'scale(0.9)' }}>
-                    <span style={{ fontSize: 24, letterSpacing: 1, whiteSpace: 'nowrap' }}>
-                        {usdSelected ? <span style={{ fontSize: 14 }}>$ </span> : ''}{displayPrice ?? '-'}{usdSelected ? '' : <span style={{ fontSize: 12 }}> WPLS / DAI</span>}
-                    </span>
-                </div>
-
-                <div style={{ textAlign: 'center', paddingTop: 0, fontSize: 24 }}>
-                    {isLoading && selected !== 'ATL' ? <span>
-                            <Tooltip content="Loading Historical Data...">
-                                <div style={{ fontSize: 15, fontFamily: 'sans-serif' }}>
-                                    Loading...
-                                </div>
-                                <div style={{ position: 'position', height: 16, marginTop: 10 }}>
-                                    <LoadingBar estTime={30} completed={!isLoading}/>
-                                </div>
-                                {/* <LoadingWave numDots={8} speed={100}/> */}
-                            </Tooltip>
-                        </span> : <span style={{ color: percentChangeColor }}>
-                            {usdSelected ? `${percentChange.toFixed( isX ? 2 : 1 )}${percentageUnit}` : ''}
-                        </span>
-                    }
-                </div>
-            </div>
-        </Row>
     </>
 }

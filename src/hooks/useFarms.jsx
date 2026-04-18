@@ -54,7 +54,15 @@ export default function useFarms({context, priceData}) {
         }
         walletsLength.current = Object.keys(wallets).length
     }, [Object.keys(wallets).length, priceData.refresh])
+useEffect(() => {
+    if (!readyForFirst) return
 
+    const interval = setInterval(() => {
+        fetchBalances(false)
+    }, 30000)
+
+    return () => clearInterval(interval)
+}, [readyForFirst, pools.length, Object.keys(wallets).length, priceData.refresh])
     const fetchBalances = async (useQuery = true) => {
         if(fetching.current) return
 
@@ -71,13 +79,13 @@ export default function useFarms({context, priceData}) {
             }
             setError(null)
 
-            const missingWallets = walletAddresses.filter(address => !farmBalances[address.toLowerCase()])
+      //      const missingWallets = walletAddresses.filter(address => !farmBalances[address.toLowerCase()])
 
-            if (missingWallets.length === 0) {
-                useQuery = false
-            }
+       //     if (missingWallets.length === 0) {
+       //         useQuery = false
+       //     }
 
-            const balances = useQuery && missingWallets.length > 0 ? await fetchFarmBalances(missingWallets, pools.length, settings) : {} //farmBalances
+            const balances = await fetchFarmBalances(walletAddresses, pools.length, settings) //farmBalances
             const currentFarmBalances = {...balances, ...farmBalances}
 
             const prices = priceData?.prices
@@ -119,7 +127,7 @@ export default function useFarms({context, priceData}) {
                     const token1AmountNormalized = !token1priceInfo ? '0' : parseFloat( token1AmountRaw / BigInt(10**18) / BigInt(10**(token1decimals)))
                     const token1AmountUsd = !token1priceInfo ? '0' : parseFloat(token1AmountNormalized) * token1priceUsd
 
-                    const pendingInc = (parseFloat(BigInt(farm.pendingInc ?? 0) / BigInt(10**16)) / 10**2).toString()
+                    const pendingInc = Number(farm.pendingInc ?? 0) / 1e18
                     const incPriceInfo = prices?.['0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d']
                     const incPriceUsd = Number(incPriceInfo?.priceUsd ?? 0)
                      
@@ -147,8 +155,8 @@ export default function useFarms({context, priceData}) {
                         },
                         rewards: {
                             raw: farm.pendingInc,
-                            normalized: pendingInc,
-                            usd: pendingInc * incPriceUsd
+                            normalized: Number(pendingInc), // ensure it's a number
+                            usd: Number(pendingInc) * incPriceUsd
                         }
                     }
                 })
