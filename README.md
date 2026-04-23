@@ -8,7 +8,7 @@ Privacy-first portfolio tracker for PulseChain assets with real-time pricing and
 
 ## 📦 Download
 
-👉 **Latest Release:**
+👉 **Latest Release (v2.0.0):**  
 https://github.com/exodus2020/Pulsechain-Dashboard/releases
 
 * **Windows Installer** (recommended)
