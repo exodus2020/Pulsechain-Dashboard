@@ -1,3 +1,4 @@
+// LockPage.jsx
 import { useAtom } from "jotai"
 import styled from "styled-components"
 import { appSettingsAtom, keyAtom } from "../store"
@@ -149,10 +150,23 @@ export default function LockPage () {
             </div>}
 
             <div style={{ position: 'absolute', bottom: -120, textAlign: 'center', width: '100%', fontSize: 14 }}>
-                Download for PC & MacOS<br/>
-                <a href="https://gitlab.com/pulsechain-lunagray/pulsechain-dashboard" target="_blank" style={{ color: 'white', marginTop: 10, display: 'inline-block'}}>
-                    Open-Source Repository & Downloads
-                </a>
+                <a
+                    href="https://github.com/exodus2020/Pulsechain-Dashboard/releases"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: 'white', display: 'block', marginBottom: 6 }}
+                    >
+                    Download for PC & MacOS
+                    </a>
+
+                    <a
+                    href="https://github.com/exodus2020/Pulsechain-Dashboard"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: 'white', display: 'block' }}
+                    >
+                    Open-Source Repository
+                    </a>
             </div>
         </SubText>
     </LockWrapper>

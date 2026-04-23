@@ -1,5 +1,5 @@
+// HistoriesPage.jsx
 import styled from "styled-components"
-import useHistory from "../hooks/useHistory"
 import { useEffect, useState } from "react"
 import BasicChart from "../components/BasicChart"
 import LoadingWave from "../components/LoadingWave"
@@ -28,11 +28,10 @@ const Wrapper = styled.div`
 `
 
 export default function HistoriesPage({ historyData }) {
-    const { history, getHistory, chartKeyPoints, fetchMore, isLoading, isError, progress } = historyData
+    const { history, getHistory, fetchMore, isLoading, progress } = historyData
     const [ settings ] = useAtom(appSettingsAtom)
 
     const [ chartData, setChartData ] = useState([])
-    const [ chartDataInverted, setChartDataInverted ] = useState([])
 
     const tokenToUse = '0xe56043671df55de5cdf8459710433c10324de0ae'
 
@@ -43,20 +42,14 @@ export default function HistoriesPage({ historyData }) {
                 timestamp: m.timestamp,
                 price: m.price
             })))
-            setChartDataInverted(history[tokenToUse].map(m => ({
-                blockNumber: m.blockNumber,
-                timestamp: m.timestamp,
-                price: m.priceInverted
-            })))
         }
-    }, [history])
+    }, [history, tokenToUse])
 
     useEffect(() => {
-        if (!history[tokenToUse]) {
+        if (!history?.[tokenToUse]) {
             getHistory(tokenToUse, true, settings)
         }
-    }, [])
-
+    }, [history?.[tokenToUse], tokenToUse, getHistory, settings])
     
 
     return (
@@ -68,7 +61,7 @@ export default function HistoriesPage({ historyData }) {
             {history?.[tokenToUse]?.length > 0 ? <div>
                 <div>
                     <div>
-                        7D: {chartData.length - (/4*7) > 0 ? parseFloat((chartData[chartData.length - 1]?.price / chartData[chartData.length - (24*7)]?.price) * 100 - 100).toFixed(2) : ''} % <br/>
+                        7D: {chartData.length - (24 * 7) > 0 ? parseFloat((chartData[chartData.length - 1]?.price / chartData[chartData.length - (24 * 7)]?.price) * 100 - 100).toFixed(2) : ''} % <br/>
                         24H: {chartData.length - 24 > 0 ? parseFloat((chartData[chartData.length - 1]?.price / chartData[chartData.length - 24]?.price) * 100 - 100).toFixed(2) : ''} % <br/>
                         1H: {chartData.length - 1 > 0 ? parseFloat((chartData[chartData.length - 1]?.price / chartData[chartData.length - 2]?.price) * 100 - 100).toFixed(2) : ''} % <br/>
                         Load Time: {(Number(progress.end) - Number(progress.start)) / 1_000} s<br/>

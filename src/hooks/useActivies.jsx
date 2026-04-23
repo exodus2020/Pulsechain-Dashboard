@@ -1,5 +1,7 @@
+// useActivies.jsx
 import { useEffect, useState } from "react"
 import { batchFetchActivities } from "../lib/web3"
+import { defaultSettings } from "../config/settings"
 
 
 export default function useActivities (wallets = [], network = 'mainnet', settings = defaultSettings) {

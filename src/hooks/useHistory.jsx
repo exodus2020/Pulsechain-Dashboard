@@ -30,36 +30,59 @@ export default function useHistory({ priceData }) {
     const { prices } = priceData
     const bestStable = priceData?.bestStable
     const isReady = Object.keys(prices).length > 0 && bestStable?.pair
+
+    const CANONICAL_WPLS_DAI_PAIR = '0xe56043671df55de5cdf8459710433c10324de0ae'
+    const WPLS_ADDRESS = '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
     const getTokenInfoForLp = useCallback((lpAddress) => {
-    if (!lpAddress) return null
+        if (!lpAddress) return null
 
-    const normalizedLp = lpAddress.toLowerCase()
+        const normalizedLp = lpAddress.toLowerCase()
 
-    const directTokenAddress = Object.keys(prices).find(
-        address => prices[address]?.pairId?.toLowerCase() === normalizedLp
-    )
+        // Always treat the canonical WPLS/DAI pool as WPLS price history,
+        // never as the stablecoin side of the pair.
+        if (normalizedLp === CANONICAL_WPLS_DAI_PAIR) {
+            return prices[WPLS_ADDRESS] ?? Object.values(prices).find(p => p.symbol === 'WPLS') ?? null
+        }
 
-    if (directTokenAddress) {
-        return prices[directTokenAddress]
-    }
+        const directTokenAddress = Object.keys(prices).find(
+            address =>
+                address.toLowerCase() !== WPLS_ADDRESS &&
+                prices[address]?.pairId?.toLowerCase() === normalizedLp
+        )
 
-    // Fallbacks for hardcoded pairs used in this file
-    if (normalizedLp === '0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9') {
-        return Object.values(prices).find(p => p.symbol === 'PLSX') ?? null
-    }
+        if (directTokenAddress) {
+            return prices[directTokenAddress]
+        }
 
-    if (normalizedLp === '0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa') {
-        return Object.values(prices).find(p => p.symbol === 'INC') ?? null
-    }
+        // Fallbacks for hardcoded pairs used in this file
+        if (normalizedLp === '0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9') {
+            return Object.values(prices).find(p => p.symbol === 'PLSX') ?? null
+        }
 
-    return null
-}, [prices])
+        if (normalizedLp === '0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa') {
+            return Object.values(prices).find(p => p.symbol === 'INC') ?? null
+        }
 
-    const DAYS = 30// 30 days of data for 30D change
+        return null
+    }, [prices])
+
+    const DAYS = 30 // 30 days of data for 30D change
     const CHUNK_SIZE = 50000
-    const BLOCKS_TO_FETCH = 86400 / 10 * DAYS // One day worth of blocks
-    const BLOCKS_PER_HOUR = 360 // 10 seconds per block * 360 = 1 hour
-    const SECONDS_PER_BLOCK = 10
+    const BLOCKS_TO_FETCH = 86400 / 10 * DAYS
+    const BLOCKS_PER_HOUR = 360 // kept for grouping only
+
+    const mapBlockToRecentTimestamp = (blockNumber, startBlock, currentBlock, currentTime) => {
+        if (!blockNumber || !startBlock || !currentBlock || currentBlock <= startBlock) {
+            return currentTime
+        }
+
+        const range = currentBlock - startBlock
+        const progress = (blockNumber - startBlock) / range
+        const clampedProgress = Math.max(0, Math.min(1, progress))
+        const startTime = currentTime - (DAYS * 24 * 60 * 60 * 1000)
+
+        return startTime + (clampedProgress * (currentTime - startTime))
+    }
 
     const [ init, setInit ] = useState(false)
     const initializing = useRef(false)
@@ -91,8 +114,8 @@ export default function useHistory({ priceData }) {
                 if (initializing.current) return
                 initializing.current = true
 
-                const bestStableAddress = bestStable?.pair ?? '0xe56043671df55de5cdf8459710433c10324de0ae'
-                const plsPairId = Object.values(prices).find(p => p.symbol === 'PLS')?.pairId ?? bestStableAddress
+                const bestStableAddress = CANONICAL_WPLS_DAI_PAIR
+                const plsPairId = CANONICAL_WPLS_DAI_PAIR
                 const hexPairId = Object.values(prices).find(p => p.symbol === 'HEX')?.pairId
 
                 const initialPairs = [
@@ -103,10 +126,14 @@ export default function useHistory({ priceData }) {
                     hexPairId ?? '0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65' // HEX
                 ].filter((value, index, array) => value && array.indexOf(value) === index)
                 
-                fetchDailyCandles(bestStableAddress)
-                getChartHistory(bestStableAddress, true, settings)
+                // getChartHistory(bestStableAddress, true, settings)
 
                 try {
+                    fetchDailyCandles(bestStableAddress)
+                    fetchDailyCandles('0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9') // PLSX
+                    fetchDailyCandles('0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa') // INC
+                    fetchDailyCandles(hexPairId ?? '0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65') // HEX
+
                     const results = await Promise.allSettled(
                         initialPairs.map(address => getHistory(address, false, settings))
                     )
@@ -121,21 +148,15 @@ export default function useHistory({ priceData }) {
 
                     const parsedReserves = fulfilledResults.reduce((acc, result) => {
                         acc[result.value.address] = result.value.reserves
-                            return acc
+                        return acc
                     }, {})
 
-// setHistory(parsedHistory)
-setChartKeyPoints(prev => ({ ...prev, ...parsedHistory }))
-Object.keys(parsedHistory).forEach(address => {
-    if (address !== bestStableAddress) {
-        fetchDailyCandles(address)
-    }
-})
-setReserves(prev => ({ ...prev, ...parsedReserves }))
+                    setChartKeyPoints(prev => ({ ...prev, ...parsedHistory }))
+                    setReserves(prev => ({ ...prev, ...parsedReserves }))
                 } catch (error) {
                     console.error('Error in getInitialData, attempting again')
                     try {
-                        getHistory(bestStableAddress, true, settings).then(() => { //WPLS-DAI
+                        getHistory(CANONICAL_WPLS_DAI_PAIR, true, settings).then(() => { // WPLS-DAI
                             getHistory('0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9', true, settings).then(() => { // WPLS-PLSX
                                 getHistory('0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa', true, settings).then(() => { // WPLS-Incentive
                                     getHistory(hexPairId ?? '0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65', true, settings).then(() => { // WPLS-HEX
@@ -157,13 +178,11 @@ setReserves(prev => ({ ...prev, ...parsedReserves }))
 
             }
             getInitialData()
-        } else if (init && bestStable?.pair) {
+                } else if (init && bestStable?.pair) {
     const bestStableAddress = bestStable.pair
 
-    if (!history?.[bestStableAddress]?.length) {
-        console.log('hydrating stable full history')
-        getChartHistory(bestStableAddress, true, settings)
-    }
+    // disabled full stable history hydration for now
+    // it is causing the renderer to stall/crash on startup
 
     if (!chartKeyPoints?.[bestStableAddress]?.length) {
         console.log('hydrating stable short history')
@@ -269,31 +288,33 @@ setReserves(prev => ({ ...prev, ...parsedReserves }))
             
             setProgress({ ...progress, start, end: new Date().getTime() })
 
-            // Calculate current time and work backwards
             const currentTime = new Date().getTime()
 
-            // Group prices by hourly blocks
+            // Group prices by hourly-ish buckets and map them evenly across the last 30 days
             const priceHistory = {}
             events.forEach(event => {
                 const hourlyBlock = Math.floor(event.blockNumber / BLOCKS_PER_HOUR) * BLOCKS_PER_HOUR
-                const blockDiff = currentBlock - event.blockNumber
-                const timestamp = currentTime - (blockDiff * SECONDS_PER_BLOCK * 1000)
+                const timestamp = mapBlockToRecentTimestamp(
+                    event.blockNumber,
+                    startBlock,
+                    currentBlock,
+                    currentTime
+                )
 
                 if (!priceHistory[hourlyBlock]) {
                     priceHistory[hourlyBlock] = {
                         lastPrice: event.price,
                         lastPriceInverted: event.priceInverted,
                         blockNumber: hourlyBlock,
-                        timestamp: timestamp
+                        timestamp
                     }
                 } else {
-                    // Update only if this event is more recent in the hour
                     if (event.blockNumber > priceHistory[hourlyBlock].blockNumber) {
                         priceHistory[hourlyBlock] = {
                             lastPrice: event.price,
                             lastPriceInverted: event.priceInverted,
                             blockNumber: hourlyBlock,
-                            timestamp: timestamp
+                            timestamp
                         }
                     }
                 }
@@ -355,7 +376,11 @@ setReserves(prev => ({ ...prev, ...parsedReserves }))
     }, [prices])
     const fetchDailyCandles = async (lpAddress) => {
     try {
-        const url = `https://api.geckoterminal.com/api/v2/networks/pulsechain/pools/${lpAddress}/ohlcv/day?aggregate=1&limit=100`
+        const isWplsDaiPair =
+            lpAddress?.toLowerCase() === '0xe56043671df55de5cdf8459710433c10324de0ae'
+
+        const tokenParam = isWplsDaiPair ? 'quote' : 'base'
+        const url = `https://api.geckoterminal.com/api/v2/networks/pulsechain/pools/${lpAddress}/ohlcv/day?aggregate=1&limit=100&currency=usd&token=${tokenParam}&include_empty_intervals=true`
 
         const res = await fetch(url)
         const json = await res.json()
@@ -437,31 +462,33 @@ setReserves(prev => ({ ...prev, ...parsedReserves }))
             
             setProgress({ ...progress, start, end: new Date().getTime() })
 
-            // Calculate current time and work backwards
             const currentTime = new Date().getTime()
 
-            // Group prices by hourly blocks
+            // Group prices by hourly-ish buckets and map them evenly across the last 30 days
             const priceHistory = {}
             events.forEach(event => {
                 const hourlyBlock = Math.floor(event.blockNumber / BLOCKS_PER_HOUR) * BLOCKS_PER_HOUR
-                const blockDiff = currentBlock - event.blockNumber
-                const timestamp = currentTime - (blockDiff * SECONDS_PER_BLOCK * 1000)
+                const timestamp = mapBlockToRecentTimestamp(
+                    event.blockNumber,
+                    startBlock,
+                    currentBlock,
+                    currentTime
+                )
 
                 if (!priceHistory[hourlyBlock]) {
                     priceHistory[hourlyBlock] = {
                         lastPrice: event.price,
                         lastPriceInverted: event.priceInverted,
                         blockNumber: hourlyBlock,
-                        timestamp: timestamp
+                        timestamp
                     }
                 } else {
-                    // Update only if this event is more recent in the hour
                     if (event.blockNumber > priceHistory[hourlyBlock].blockNumber) {
                         priceHistory[hourlyBlock] = {
                             lastPrice: event.price,
                             lastPriceInverted: event.priceInverted,
                             blockNumber: hourlyBlock,
-                            timestamp: timestamp
+                            timestamp
                         }
                     }
                 }
@@ -604,22 +631,26 @@ setReserves(prev => ({ ...prev, ...parsedReserves }))
             const priceHistory = {}
             events.forEach(event => {
                 const hourlyBlock = Math.floor(event.blockNumber / BLOCKS_PER_HOUR) * BLOCKS_PER_HOUR
-                const blockDiff = currentBlock - event.blockNumber
-                const timestamp = currentTime - (blockDiff * SECONDS_PER_BLOCK * 1000)
+                const timestamp = mapBlockToRecentTimestamp(
+                    event.blockNumber,
+                    startBlock,
+                    currentBlock,
+                    currentTime
+                )
 
                 if (!priceHistory[hourlyBlock]) {
                     priceHistory[hourlyBlock] = {
                         lastPrice: event.price,
                         lastPriceInverted: event.priceInverted,
                         blockNumber: hourlyBlock,
-                        timestamp: timestamp
+                        timestamp
                     }
                 } else if (event.blockNumber > priceHistory[hourlyBlock].blockNumber) {
                     priceHistory[hourlyBlock] = {
                         lastPrice: event.price,
                         lastPriceInverted: event.priceInverted,
                         blockNumber: hourlyBlock,
-                        timestamp: timestamp
+                        timestamp
                     }
                 }
             })
@@ -764,16 +795,17 @@ setReserves(prev => ({ ...prev, ...parsedReserves }))
         // }
     //}, [init, updateLatestHistory]) // Remove history dependency
 
-    return {
-        history,
-        chartKeyPoints,
-        dailyCandles,
-        getHistory,
-        getChartHistory,
-        fetchMore,
-        isLoading: isFetchingFullHistory || isLoading.current, //isLoading.current,
-        isError: isError.current,
-        progress,
-        resetHistory        
-    }
+        return {
+            history,
+            chartKeyPoints,
+            dailyCandles,
+            getHistory,
+            getChartHistory,
+            fetchDailyCandles,
+            fetchMore,
+            isLoading: isFetchingFullHistory || isLoading.current,
+            isError: isError.current,
+            progress,
+            resetHistory
+        }
 } 

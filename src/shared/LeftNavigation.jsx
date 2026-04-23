@@ -1,3 +1,4 @@
+/// LeftNavigation.jsx
 import styled from "styled-components"
 import { menuOptions } from "../config/menu-options" 
 import Icon from "../components/Icon"
@@ -6,11 +7,8 @@ import { useAtom } from "jotai"
 import { icons_list } from "../config/icons"
 import { useModals } from "../hooks/useModals"
 import version from "../config/version.json"
-import axios from "axios"
 import { useState } from "react"
 import Tooltip from "./Tooltip"
-import { fUnit } from "../lib/numbers"
-import Button from "../components/Button"
 
 const Wrapper = styled.div`
     position: relative;
@@ -152,12 +150,29 @@ export function LeftNavigation({ fees, toggleMode }) {
     const [ gitlabVersion, setGitlabVersion ] = useState(null)
 
     const handleOpenGitlab = async () => {
-        await window.electron.openExternal('https://gitlab.com/pulsechain-lunagray/pulsechain-dashboard')
+        await window.electron.openExternal('https://github.com/exodus2020/Pulsechain-Dashboard')
     }
 
     const handleCheckForUpdates = async () => {
-        const version = await window.electron.getFile('https://gitlab.com/pulsechain-lunagray/pulsechain-dashboard/-/raw/main/src/config/version.json?ref_type=heads')
-        setGitlabVersion(version?.version ?? null)
+        setGitlabVersion('checking')
+
+        try {
+            const remoteVersion = await window.electron.getFile(
+                'https://raw.githubusercontent.com/exodus2020/Pulsechain-Dashboard/main/src/config/version.json'
+            )
+
+            const nextVersion = remoteVersion?.version ?? 'error'
+            setGitlabVersion(nextVersion)
+
+            if (
+                nextVersion !== 'error' &&
+                version.version !== nextVersion
+            ) {
+                await window.electron.openExternal('https://github.com/exodus2020/Pulsechain-Dashboard/releases')
+            }
+        } catch (error) {
+            setGitlabVersion('error')
+        }
     }
 
     const handleToggleMode = () => {
@@ -214,7 +229,7 @@ export function LeftNavigation({ fees, toggleMode }) {
                 <div className="nav-footer" style={{ minHeight: 40 }}>
                     <div>
                         <div style={{ textAlign: 'left', paddingLeft: 9}}>
-                            <Tooltip content="Launch Gitlab" placement="right">
+                            <Tooltip content="Open GitHub" placement="right">
                                 <div 
                                     className="hoverable" 
                                     style={{ cursor: 'pointer', display: 'inline-block'}}
@@ -231,8 +246,16 @@ export function LeftNavigation({ fees, toggleMode }) {
                         </div>
                         <div className="mute version" style={expanded ? { right: 12, top: 33, opacity: 1 } : { right: -85, top: 33, opacity: 0, pointerEvents: 'none' }}>
                             <div>
-                                <span className={gitlabVersion ? 'mute' : 'text-link'} onClick={handleCheckForUpdates}>
-                                    {gitlabVersion && version.version !== gitlabVersion ? `Update Available v${gitlabVersion}` : gitlabVersion && version.version === gitlabVersion ? 'No Updates Available' : 'Check for Updates'}
+                                <span className="text-link" onClick={handleCheckForUpdates}>
+                                    {gitlabVersion === 'checking'
+                                        ? 'Checking...'
+                                        : gitlabVersion === 'error'
+                                        ? 'Update check failed'
+                                        : gitlabVersion && version.version !== gitlabVersion
+                                        ? `Update Available v${gitlabVersion}`
+                                        : gitlabVersion && version.version === gitlabVersion
+                                        ? 'No Updates Available'
+                                        : 'Check for Updates'}
                                 </span>
                             </div>
                         </div>

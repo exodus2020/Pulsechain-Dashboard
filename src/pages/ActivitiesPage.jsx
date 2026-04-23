@@ -1,3 +1,4 @@
+// ActivitiesPage.jsx
 import styled from "styled-components"
 import Button from "../components/Button"
 import Icon from "../components/Icon"

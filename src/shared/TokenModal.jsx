@@ -1,3 +1,4 @@
+// TokenModal.jsx
 import { useAtom } from 'jotai'
 import styled from 'styled-components'
 import 'typeface-raleway'
@@ -174,14 +175,18 @@ function TokenModal({ balanceData, historyData, bestStable }) {
     setPools(pairData)
   }
 
-  const launchDapp = useCallback((url, version = (!version.current ? 'v2/' : version.current === 'v2' ? 'v2/' : '')) => {
-    if (version == 'v1') {
-      window.open(`https://ipfs.app.pulsex.com/info/${url}`, '_blank')  
+  const launchDapp = useCallback((url, selectedVersion) => {
+    const resolvedVersion =
+      selectedVersion !== undefined
+        ? selectedVersion
+        : (!version.current ? 'v2/' : version.current === 'v2' ? 'v2/' : '')
+
+    if (resolvedVersion === 'v1') {
+      window.open(`https://ipfs.app.pulsex.com/info/${url}`, '_blank')
     } else {
-      window.open(`https://ipfs.app.pulsex.com/info/${version}/${url}`, '_blank')
+      window.open(`https://ipfs.app.pulsex.com/info/${resolvedVersion}/${url}`, '_blank')
     }
-    
-  }, [version.current])
+  }, [])
 
   useEffect(() => {
     if (m?.token1?.id && m?.token0?.id) {
@@ -241,7 +246,11 @@ function TokenModal({ balanceData, historyData, bestStable }) {
               </div>
 
               <div style={{ marginBottom: 10 }}>
-                <div>WPLS - {symbol} Liquidity Pair</div>
+                <div>
+                  {m?.pairId?.toLowerCase() === bestStable?.pair?.toLowerCase()
+                    ? 'WPLS - DAI Liquidity Pair'
+                    : `WPLS - ${symbol} Liquidity Pair`}
+                </div>
                 <div style={{ marginTop: 5}}>
                   <div style={{ display: 'inline-block', width: 20, cursor: 'pointer' }} onClick={() => handleCopy(m.pairId)}>
                     <Icon icon={icons_list.copy} size={14}/>

@@ -578,6 +578,31 @@ function calculateTokenPrice (tokenPrice, plsHistory, tokenHistory, bestStable, 
         }
     }
 }
+function getDailyCandleCloseNearDaysAgo(candles, daysAgo) {
+    if (!Array.isArray(candles) || candles.length === 0) return 0
+
+    const latestTimestamp = Number(candles[candles.length - 1]?.timestamp)
+    if (!Number.isFinite(latestTimestamp) || latestTimestamp <= 0) return 0
+
+    const targetTime = latestTimestamp - (daysAgo * 24 * 60 * 60 * 1000)
+
+    let closest = null
+    let smallestDiff = Infinity
+
+    for (const item of candles) {
+        const ts = Number(item?.timestamp)
+        if (!Number.isFinite(ts) || ts <= 0) continue
+
+        const diff = Math.abs(ts - targetTime)
+        if (diff < smallestDiff) {
+            smallestDiff = diff
+            closest = item
+        }
+    }
+
+    const close = Number(closest?.close)
+    return Number.isFinite(close) && close > 0 ? close : 0
+}
 function getHistoryValueNearDaysAgo(history, priceProperty, daysAgo, usdSelected, priceModifier) {
     if (!Array.isArray(history) || history.length === 0) return 0
 
@@ -726,24 +751,12 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
 
     const rawSevenDayPrice =
         candleData?.length
-            ? getHistoryValueNearDaysAgo(
-                candleData,
-                'close',
-                7,
-                false,
-                1
-            )
+            ? getDailyCandleCloseNearDaysAgo(candleData, 7)
             : 0
 
     const rawThirtyDayPrice =
         candleData?.length
-            ? getHistoryValueNearDaysAgo(
-                candleData,
-                'close',
-                30,
-                false,
-                1
-            )
+            ? getDailyCandleCloseNearDaysAgo(candleData, 30)
             : 0
 
     const hasDistinctRawThirtyDayPrice =
@@ -786,10 +799,14 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
     const sevenDayPrice = isPlsWplsMode
         ? 1
         : isPls
-            ? (historySevenDayPrice || rawSevenDayPrice)
+            ? (
+                usdSelected
+                    ? (rawSevenDayPrice || historySevenDayPrice || 0)
+                    : (historySevenDayPrice || 1)
+            )
             : (usdSelected
-                ? (fallbackSevenDayPriceUsd || historySevenDayPrice)
-                : (fallbackSevenDayPriceWpls || historySevenDayPrice))
+                ? (rawSevenDayPrice || fallbackSevenDayPriceUsd || historySevenDayPrice || 0)
+                : (fallbackSevenDayPriceWpls || historySevenDayPrice || 0))
 
     const plsHasDistinct30DayHistory =
         Number.isFinite(historyThirtyDayPrice) &&
@@ -801,14 +818,13 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
         ? 1
         : isPls
             ? (
-                plsHasDistinct30DayHistory
-                    ? historyThirtyDayPrice
-                    : 0
+                usdSelected
+                    ? (rawThirtyDayPrice || rawSevenDayPrice || historyThirtyDayPrice || historySevenDayPrice || 0)
+                    : (historyThirtyDayPrice || historySevenDayPrice || 1)
             )
             : (usdSelected
-                ? (fallbackThirtyDayPriceUsd || historyThirtyDayPrice)
-                : (fallbackThirtyDayPriceWpls || historyThirtyDayPrice))
-
+                ? (rawThirtyDayPrice || fallbackThirtyDayPriceUsd || historyThirtyDayPrice || 0)
+                : (fallbackThirtyDayPriceWpls || historyThirtyDayPrice || 0))
     // removed PLS LONG RANGE DEBUG log
 
 
@@ -900,11 +916,10 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
         !hasOverridePercent &&
         isPls &&
         !plsHasDistinct30DayHistory &&
+        rawThirtyDayPrice <= 0 &&
         (
             !Number.isFinite(denominator) ||
-            denominator <= 0 ||
-            !Array.isArray(longHistory) ||
-            longHistory.length === 0
+            denominator <= 0
         )
 
     const percentChange =

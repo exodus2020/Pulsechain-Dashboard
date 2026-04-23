@@ -1,5 +1,5 @@
+// useGasEstimates.jsx
 import { useState, useEffect } from "react";
-import Web3 from "web3";
 import { calculateFeeOptions } from "../lib/gasEstimator";
 import { estimateFees } from '@pulsechainorg/gas-estimation';
 import { defaultSettings } from "../config/settings";

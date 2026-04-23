@@ -96,6 +96,8 @@ function BasicChart({
 }) {
     const canvasRef = useRef(null)
     const animationRef = useRef(null)
+    const drawFrameRef = useRef(null)
+    const pingFrameRef = useRef(null)
     const [tooltipData, setTooltipData] = useState({ show: false, x: 0, y: 0, data: null })
     const [animationProgress, setAnimationProgress] = useState(0)
     const [pingRadius, setPingRadius] = useState(0)
@@ -106,42 +108,67 @@ function BasicChart({
         if (!canvasRef.current || !data.length) return
 
         const rect = canvasRef.current.getBoundingClientRect()
+        const displayWidth = rect.width || width
+        const displayHeight = rect.height || height
+
         const x = e.clientX - rect.left
-        const y = e.clientY - rect.top
 
         const margin = { top: 20, right: 20, bottom: 30, left: 80 }
-        const chartWidth = width - margin.left - margin.right
-        
-        // Keep x position within chart bounds
-        const boundedX = Math.max(margin.left, Math.min(x, width - margin.right))
+        const chartWidth = displayWidth - margin.left - margin.right
+        const chartHeight = displayHeight - margin.top - margin.bottom
+
+        const boundedX = Math.max(margin.left, Math.min(x, displayWidth - margin.right))
         setMouseX(boundedX)
 
+        const xMin = data[0][xKey]
+        const xMax = data[data.length - 1][xKey]
+        const xRange = Math.max(1, xMax - xMin)
+
         const xScale = (val) => {
-            const xMin = data[0][xKey]
-            const xMax = data[data.length - 1][xKey]
-            return margin.left + ((val - xMin) / (xMax - xMin)) * chartWidth
+            return margin.left + ((val - xMin) / xRange) * chartWidth
         }
+
+        const yValues = data
+            .map(d => Number(d[yKey]))
+            .filter(val => !isNaN(val) && isFinite(val))
+
+        if (!yValues.length) return
+
+        const minY = Math.min(...yValues)
+        const maxY = Math.max(...yValues)
 
         const yScale = (val) => {
-            const yValues = data.map(d => d[yKey])
-            const minY = Math.min(...yValues)
-            const maxY = Math.max(...yValues)
-            const yRange = maxY - minY
-            const chartHeight = height - margin.top - margin.bottom
-            return height - margin.bottom - ((val - minY) / yRange) * chartHeight
+            const numericVal = Number(val)
+
+            if (!isFinite(numericVal)) {
+                return displayHeight - margin.bottom
+            }
+
+            if (maxY === minY) {
+                return margin.top + (chartHeight / 2)
+            }
+
+            const yPadding = (maxY - minY) * 0.1
+            const yRange = (maxY - minY) + yPadding
+
+            return displayHeight - margin.bottom - ((numericVal - minY) / yRange) * chartHeight
         }
 
-        // Find closest data point to mouse x position
         const closest = data.reduce((prev, curr) => {
             const prevX = xScale(prev[xKey])
             const currX = xScale(curr[xKey])
             return Math.abs(currX - boundedX) < Math.abs(prevX - boundedX) ? curr : prev
         })
 
+        const snappedX = xScale(closest[xKey])
+        const snappedY = yScale(closest[yKey])
+
+        setMouseX(snappedX)
+
         setTooltipData({
             show: true,
-            x: boundedX,
-            y: yScale(closest[yKey]),
+            x: snappedX,
+            y: isFinite(snappedY) ? snappedY : (margin.top + chartHeight / 2),
             data: closest
         })
     }
@@ -161,20 +188,24 @@ function BasicChart({
         setAnimationProgress(progress)
 
         if (progress < 1) {
-            requestAnimationFrame(animate)
+            drawFrameRef.current = requestAnimationFrame(animate)
         } else {
-            // Start ping animation
             animatePing()
         }
     }
 
     const animatePing = () => {
+        if (pingFrameRef.current) {
+            cancelAnimationFrame(pingFrameRef.current)
+        }
+
         const pingAnimation = (timestamp) => {
             const radius = (timestamp % 1000) / 1000 * 10
             setPingRadius(radius)
-            requestAnimationFrame(pingAnimation)
+            pingFrameRef.current = requestAnimationFrame(pingAnimation)
         }
-        requestAnimationFrame(pingAnimation)
+
+        pingFrameRef.current = requestAnimationFrame(pingAnimation)
     }
 
     useEffect(() => {
@@ -244,9 +275,9 @@ function BasicChart({
         // Adjust x interval based on data range
         const timeSpan = data[data.length - 1][xKey] - data[0][xKey]
         const hourInMs = 3600000
-        const adjustedXInterval = timeSpan < hourInMs * 24 ? 
-            Math.max(1, Math.floor(data.length / 6)) : // For short timeframes
-            xInterval
+        const adjustedXInterval = timeSpan < hourInMs * 24
+            ? Math.max(1, Math.floor(data.length / 6))
+            : Math.max(1, Number(xInterval) || 1)
 
         // Vertical grid lines
         for (let i = 0; i < data.length; i += adjustedXInterval) {
@@ -269,7 +300,7 @@ function BasicChart({
         ctx.strokeStyle = lineColor
         ctx.lineWidth = 2
 
-        const animatedLength = Math.floor(data.length * animationProgress)
+        const animatedLength = data.length
         let hasStarted = false
 
         data.slice(0, animatedLength).forEach((point, i) => {
@@ -291,30 +322,9 @@ function BasicChart({
         })
         ctx.stroke()
 
-        // Draw ping at end if animation complete
-        if (animationProgress === 1 && data.length > 0) {
-            const lastPoint = data[data.length - 1]
-            const x = scaleX(lastPoint[xKey])
-            const y = scaleY(lastPoint[yKey])
+        // Ping animation disabled while stabilizing renderer
 
-            ctx.beginPath()
-            ctx.strokeStyle = `rgba(0, 255, 0, ${1 - (pingRadius / 10)})`
-            ctx.arc(x, y, pingRadius * 5, 0, Math.PI * 2)
-            ctx.stroke()
-        }
-
-        // Draw data labels if enabled
-        if (showDataLabels && animationProgress === 1) {
-            ctx.fillStyle = 'white'
-            ctx.font = '10px Arial'
-            data.forEach((point, i) => {
-                if (i % dataLabelInterval === 0) {
-                    const x = scaleX(point[xKey])
-                    const y = scaleY(point[yKey].price)
-                    ctx.fillText(formatPrice(point[yKey]), x, y - 5)
-                }
-            })
-        }
+        // Data labels disabled while stabilizing renderer
 
         // Draw axes
         ctx.beginPath()
@@ -330,14 +340,45 @@ function BasicChart({
 
     }, [data, width, height, xKey, yKey, animationProgress, pingRadius])
 
-    // Start animation when data changes
+    // Animation disabled while stabilizing renderer
     useEffect(() => {
-        if (data.length) {
-            animationRef.current = null
-            setAnimationProgress(0)
-            requestAnimationFrame(animate)
+        if (drawFrameRef.current) {
+            cancelAnimationFrame(drawFrameRef.current)
+            drawFrameRef.current = null
+        }
+
+        if (pingFrameRef.current) {
+            cancelAnimationFrame(pingFrameRef.current)
+            pingFrameRef.current = null
+        }
+
+        animationRef.current = null
+        setAnimationProgress(1)
+        setPingRadius(0)
+
+        return () => {
+            if (drawFrameRef.current) {
+                cancelAnimationFrame(drawFrameRef.current)
+                drawFrameRef.current = null
+            }
+
+            if (pingFrameRef.current) {
+                cancelAnimationFrame(pingFrameRef.current)
+                pingFrameRef.current = null
+            }
         }
     }, [data])
+
+        useEffect(() => {
+        return () => {
+            if (drawFrameRef.current) {
+                cancelAnimationFrame(drawFrameRef.current)
+            }
+            if (pingFrameRef.current) {
+                cancelAnimationFrame(pingFrameRef.current)
+            }
+        }
+    }, [])
 
     // Format timestamp for x-axis labels
     const formatTime = (timestamp) => {
@@ -405,7 +446,7 @@ function BasicChart({
                     className="tooltip" 
                     style={{ 
                         left: tooltipData.x,
-                        top: tooltipData.y - 20
+                        top: Number.isFinite(tooltipData.y) ? tooltipData.y - 20 : 40
                     }}
                 >
                     <div>Date: {formatTime(tooltipData.data[xKey])}</div>

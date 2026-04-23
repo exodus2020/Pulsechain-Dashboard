@@ -90,47 +90,21 @@ export default function usePrice(context) {
             const wplsPriceInUSDT = (Number(wplsusdt.reserve0) / Math.pow(10, 6)) / 
                                     ((Number(wplsusdt.reserve1) / Math.pow(10, 18)) ?? 1)
 
-            const stables = [{
+            const bestStable = {
                 name: 'Dai Stablecoin',
                 symbol: 'DAI',
                 pair: '0xe56043671df55de5cdf8459710433c10324de0ae',
                 price: wplsPriceInDAI,
                 invert: false,
                 decimals: 18
-            },
-            {
-                name: 'USD Coin',
-                symbol: 'USDC',
-                pair: '0x6753560538eca67617a9ce605178f788be7e524e',
-                price: wplsPriceInUSDC,
-                invert: true,
-                decimals: 6
-            },
-            {
-                name: 'Tether USD',
-                symbol: 'USDT',
-                pair: '0x322df7921f28f1146cdf62afdac0d6bc0ab80711',
-                price: wplsPriceInUSDT,
-                invert: true,
-                decimals: 6
-            }]
+            }
 
-            const bestStable = stables.reduce((best, stable) => {
-                if (isNaN(Number(stable.price))) return best
-
-                const price = Number(stable.price)
-                return price > best.price ? stable : best
-            }, { pair: null, symbol: null, price: 0, invert: false })
-
-            const priceDifferencePercentage = 
-                !bestStableRef?.current?.pair ? 0 // Zero if no current pair exists
-                : (Number(bestStable.price) - Number(bestStableRef?.current?.price)) / Number(bestStable.price)
-            
-            const switchBestStable = priceDifferencePercentage > 0.02
-
-            if (!bestStableRef?.current?.pair || switchBestStable) {
+            if (
+                bestStableRef.current.pair !== bestStable.pair ||
+                Number(bestStableRef.current.price) !== Number(bestStable.price)
+            ) {
                 bestStableRef.current = bestStable
-                if (switchBestStable) setStableUpdated(prev => prev + 1)
+                setStableUpdated(prev => prev + 1)
             }
 
             const pricePairsKeys = Object.keys(pricePairs)
