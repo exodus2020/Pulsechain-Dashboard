@@ -6,6 +6,31 @@ Privacy-first portfolio tracker for PulseChain assets with real-time pricing and
 
 ---
 
+## 🚀 v2.1.0 — Stability & Charting Update
+
+This release focuses on improving reliability, performance, and overall user experience.
+
+### 🔧 Improvements
+- Fixed incorrect % changes (1H, 6H, 24H, 7D, 30D)
+- Standardized chart logic using hourly candle data
+- Improved chart loading behavior for non-core tokens
+- Added fallback handling for tokens missing price data
+- Fixed duplicate tokens appearing in wallet scans
+- Allow removal of tokens even if they fail to load
+- Improved token image loading with better fallback logic
+
+### 🎨 UI/UX
+- Improved spacing and layout consistency
+- Fixed token row alignment issues
+- Version display now reflects actual app version dynamically
+
+### 🛠️ Under the Hood
+- Reduced reliance on unreliable external price sources
+- Improved caching behavior for chart data
+- Stabilized modal + chart rendering
+
+---
+
 ## 📦 Download
 
 👉 **Latest Release:**

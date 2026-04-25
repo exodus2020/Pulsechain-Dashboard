@@ -8,6 +8,7 @@ import styled from "styled-components"
 import { Selector } from "./Selector"
 import { appSettingsAtom } from "../store"
 import { useAtom } from "jotai"
+import { useEffect } from "react"
 // import { calculatePercentages } from "./PricesComponent"
 
 const PercentChange = styled.div`
@@ -37,7 +38,7 @@ function HistoryChart({ historyData, pairAddress, pairInfo, tokenAddress, bestSt
 
     const chartData = isWpls
         ? wplsHistory
-        : (pairDailyCandles.length > 0 ? pairDailyCandles : pairHistoryData)
+        : pairDailyCandles
     const dataExists = chartData.length > 0
     const [settings] = useAtom(appSettingsAtom)
 
@@ -62,15 +63,19 @@ function HistoryChart({ historyData, pairAddress, pairInfo, tokenAddress, bestSt
     const handleLoadPriceChart = () => {
         if (isLoading || dataExists) return
 
-        if (isWpls) {
-            if (!stableLpAddress) return
-            fetchDailyCandles(stableLpAddress)
-            return
-        }
-
         if (!pairAddress) return
-        getHistory(pairAddress, true, settings)
+
+        // 🔥 ALWAYS try candles first
+        fetchDailyCandles(pairAddress)
     }
+        useEffect(() => {
+            if (!pairAddress) return
+
+            // only fetch if we truly have no usable data
+            if (!pairDailyCandles.length) {
+                fetchDailyCandles(pairAddress)
+            }
+        }, [pairAddress, pairDailyCandles.length])
 
     const { formattedChartData, formattedPercentageChange } = useMemo(() => {
         const percChange = [...(chartKeyPoints?.[pairAddress] ?? [])].sort((a, b) => b.timestamp - a.timestamp)
@@ -158,23 +163,35 @@ function HistoryChart({ historyData, pairAddress, pairInfo, tokenAddress, bestSt
     // const d7Percentage = percentchanges?.d7 ? (percentchanges?.d7?.percentChangeRaw ?? NaN) : NaN
 
     return (
-        <div style={{ position: 'relative', paddingBottom: 35 }}>
+        <div style={{ position: 'relative', paddingBottom: 35, minWidth: 360, minHeight: 320 }}>
             <div style={{ position: 'absolute', top: -20, right: 10, zIndex: 50 }}>
                 <Selector options={['WPLS', 'USD']} value={selected} onChange={setSelected}/>
             </div>
-            <BasicChart 
-                data={formattedChartData}
-                xKey="timestamp"
-                yKey="price"
-                width={700}
-                height={400}
-                lineColor="#00ff00"
-                xInterval={Math.max(1, Number(2 * (calculateScaledResultForChart(chartData.length) ?? 5)) || 1)}
-                yInterval={5}
-                showDataLabels={false}
-                dataLabelInterval={10}
-                unit={isToken0Wpls || selected === 'USD' ? 'USD' : 'WPLS'}
-            />
+            {formattedChartData.length > 0 ? (
+                <BasicChart 
+                    key={`${pairAddress}-${selected}-${formattedChartData.length}`}
+                    data={formattedChartData}
+                    xKey="timestamp"
+                    yKey="price"
+                    width={700}
+                    height={400}
+                    lineColor="#00ff00"
+                    xInterval={Math.max(1, Number(2 * (calculateScaledResultForChart(chartData.length) ?? 5)) || 1)}
+                    yInterval={5}
+                    showDataLabels={false}
+                    dataLabelInterval={10}
+                    unit={isToken0Wpls || selected === 'USD' ? 'USD' : 'WPLS'}
+                />
+            ) : (
+                <div style={{
+                    height: 320,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                }}>
+                    <LoadingWave numDots={5} speed={100}/>
+                </div>
+            )}
             {/* <div style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '40px', backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
                 {!isWpls && !isStable && formattedPercentageChange.length > 1 ? <div style={{ position: 'absolute', width: '100%', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', display: 'flex', justifyContent: 'space-between' }}>
                     {formattedPercentageChange.length > 1 && !isNaN(h1Percentage) ? <PercentChange>
@@ -191,7 +208,7 @@ function HistoryChart({ historyData, pairAddress, pairInfo, tokenAddress, bestSt
                     </PercentChange> : ''}
                 </div> : ''}
             </div> */}
-            {!dataExists ? <div style={{ width: 200, position: 'absolute', top: '45%', left: '50%', transform: 'translate(-50%, -50%)' }}>
+            {!dataExists && isLoading ? <div style={{ width: 200, position: 'absolute', top: '45%', left: '50%', transform: 'translate(-50%, -50%)' }}>
                 <Button textAlign={'center'} onClick={handleLoadPriceChart}>
                     {isLoading ? <LoadingWave numDots={5} speed={100}/> : 'Load Price Chart'}
                 </Button>

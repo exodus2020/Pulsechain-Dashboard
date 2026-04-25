@@ -1,3 +1,4 @@
+// useFilterBalance.jsx
 import React, { useMemo } from "react"
 import { hiddenWalletsAtom } from "../store"
 import { defaultTokenInformation, liquidityPairs } from "../lib/tokens"

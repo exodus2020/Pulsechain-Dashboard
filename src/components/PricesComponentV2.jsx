@@ -7,6 +7,7 @@ import ImgPLS from '../icons/pls.png'
 import ImgPLSX from '../icons/plsx.png'
 import ImgHEX from '../icons/hex.png'
 import ImgINC from '../icons/inc.png'
+import ImgPRVX from '../icons/prvx.png'
 import { formatNumber, fUnit } from "../lib/numbers"
 import { Selector } from "./Selector"
 import Tooltip from "../shared/Tooltip"
@@ -18,8 +19,8 @@ import { timeframeAtom, tokenModalAtom } from "../store"
 const Wrapper = styled.div`
     position: relative;
     color: white;
-    min-width: 650px;
-    max-width: 650px;
+    min-width: auto;
+    max-width: fit-content;
     justify-self: center;
     font-family: 'Oswald', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
@@ -35,9 +36,10 @@ const Wrapper = styled.div`
     }
 
     .price-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr 1fr;
-        gap: 10px;
+        display: flex;
+        justify-content: center;
+        gap: 45px;
+        padding-right: 45px;
         background: rgb(0, 0, 0, 0.5);
         background: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.1));
         border-radius: 10px;
@@ -106,7 +108,7 @@ const Row = styled.div`
 
 export default memo(PricesComponentV2)
 function PricesComponentV2 ({ historyData, priceData, statsData, getImage, pulseMetrics }) {
-    const { history, resetHistory, chartKeyPoints, dailyCandles } = historyData
+    const { history, resetHistory, chartKeyPoints, dailyCandles, hourlyCandles } = historyData
     const { prices } = priceData
     // const getImageMemo = useCallback(getImage ?? (() => {}), []);
 
@@ -117,6 +119,7 @@ function PricesComponentV2 ({ historyData, priceData, statsData, getImage, pulse
     const plsxPrice = prices?.['0x95b303987a60c71504d99aa1b13b4da07b0790ab']
     const hexPrice = prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']
     const incPrice = prices?.['0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d']
+    const prvxPrice = prices?.['0xf6f8db0aba00007681f8faf16a0fda1c9b030b11']
 
     const plsFullHistory = history?.[priceData?.bestStable?.pair] ?? []
     const plsShortHistory = chartKeyPoints?.[priceData?.bestStable?.pair] ?? []
@@ -127,66 +130,96 @@ function PricesComponentV2 ({ historyData, priceData, statsData, getImage, pulse
     const invert = priceData?.bestStable?.invert ? true : false
 
     const displayArray = useMemo(() => [
-    {
-            'name': 'PLS',
-            'price': plsPrice?.priceUsd,
-            'priceWPLS': plsPrice?.priceWpls,
-            'history': plsIntradayHistory,
-            'longHistory': plsLongRangeHistory,
-            'candleKey': priceData?.bestStable?.pair,
-            'tokenInfo': plsPrice,
-            'lows': {
-                'price': 0.000009536,
-                'priceWPLS': 0.000009536,
+        {
+            name: 'PLS',
+            price: plsPrice?.priceUsd,
+            priceWPLS: plsPrice?.priceWpls,
+            history: plsIntradayHistory,
+            longHistory: plsLongRangeHistory,
+            candleKey: priceData?.bestStable?.pair,
+            tokenInfo: plsPrice,
+            lows: {
+                price: 0.000009536,
+                priceWPLS: 0.000009536,
             },
-            'image': ImgPLS,
-            'isPls': true,
-            'bestStable': priceData?.bestStable,
-            'invert': invert
-},  
-    {
-            'name': 'PLSX',
-            'tokenInfo': plsxPrice,
-            'candleKey': '0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9',
-            'price': plsxPrice?.priceUsd,
-            'priceWPLS': plsxPrice?.priceWpls,
-            'history': chartKeyPoints?.['0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9'] ?? [],
-            'lows': {
-                'price': 0.000008904 ,
-                'priceWPLS': 0.2346,
-            },
-            'image': ImgPLSX,
-            'bestStable': priceData?.bestStable
+            image: ImgPLS,
+            isPls: true,
+            bestStable: priceData?.bestStable,
+            invert: invert
         },
         {
-            'name': 'INC',
-            'price': incPrice?.priceUsd,
-            'priceWPLS': incPrice?.priceWpls,
-            'history': chartKeyPoints?.['0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa'] ?? [],
-            'candleKey': '0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa',
-            'tokenInfo': incPrice,
-            'lows': {
-                'price': 0.3947,
-                'priceWPLS': 8467.35,
+            name: 'PLSX',
+            tokenInfo: plsxPrice,
+            candleKey: '0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9',
+            price: plsxPrice?.priceUsd,
+            priceWPLS: plsxPrice?.priceWpls,
+            history: chartKeyPoints?.['0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9'] ?? [],
+            lows: {
+                price: 0.000008904,
+                priceWPLS: 0.2346,
             },
-            'image': ImgINC,
-            'bestStable': priceData?.bestStable
+            image: ImgPLSX,
+            bestStable: priceData?.bestStable
         },
         {
-            'name': 'HEX',
-            'price': hexPrice?.priceUsd,
-            'priceWPLS': hexPrice?.priceWpls,
-            'history': chartKeyPoints?.[hexPrice?.pairId] ?? [],
-            'candleKey': hexPrice?.pairId,
-            'tokenInfo': hexPrice,
-            'lows': {
-                'price': 0.003633,
-                'priceWPLS': 80.3703,
+            name: 'INC',
+            price: incPrice?.priceUsd,
+            priceWPLS: incPrice?.priceWpls,
+            history: chartKeyPoints?.['0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa'] ?? [],
+            candleKey: '0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa',
+            tokenInfo: incPrice,
+            lows: {
+                price: 0.3947,
+                priceWPLS: 8467.35,
             },
-            'image': ImgHEX,
-            'bestStable': priceData?.bestStable
-},
-    ], [prices, history, chartKeyPoints, plsPrice, plsxPrice, hexPrice, incPrice, priceData?.bestStable, getImage])
+            image: ImgINC,
+            bestStable: priceData?.bestStable
+        },
+        {
+            name: 'HEX',
+            price: hexPrice?.priceUsd,
+            priceWPLS: hexPrice?.priceWpls,
+            history: chartKeyPoints?.[hexPrice?.pairId] ?? [],
+            candleKey: hexPrice?.pairId,
+            tokenInfo: hexPrice,
+            lows: {
+                price: 0.003633,
+                priceWPLS: 80.3703,
+            },
+            image: ImgHEX,
+            bestStable: priceData?.bestStable
+        },
+        {
+            name: 'PRVX',
+            price: prvxPrice?.priceUsd,
+            priceWPLS: prvxPrice?.priceWpls,
+            history: chartKeyPoints?.['0x7f681a5ad615238357ba148c281e2eaefd2de55a'] ?? [],
+            candleKey: '0x7f681a5ad615238357ba148c281e2eaefd2de55a',
+            tokenInfo: {
+                ...prvxPrice,
+                isUsdPair: true
+            },
+            lows: {
+                price: 0,
+                priceWPLS: 0,
+            },
+            image: ImgPRVX,
+            bestStable: priceData?.bestStable
+        },
+    ], [
+        prices,
+        history,
+        chartKeyPoints,
+        plsPrice,
+        plsxPrice,
+        hexPrice,
+        incPrice,
+        prvxPrice,
+        priceData?.bestStable,
+        plsIntradayHistory,
+        plsLongRangeHistory,
+        invert
+    ])
 
     const favoriteDisplayArray = []
 
@@ -198,7 +231,7 @@ function PricesComponentV2 ({ historyData, priceData, statsData, getImage, pulse
         }
 
         const metrics = pulseMetrics ?? []
-        const wantedSymbols = new Set(['PLS', 'WPLS', 'PLSX', 'INC', 'HEX'])
+        const wantedSymbols = new Set(['PLS', 'WPLS', 'PLSX', 'INC', 'HEX', 'PRVX'])
 
         const mapped = metrics.reduce((acc, coin) => {
         const symbol = coin?.symbol
@@ -333,7 +366,12 @@ function PricesComponentV2 ({ historyData, priceData, statsData, getImage, pulse
             <Selector options={['WPLS', 'USD', 'X']} value={selectedCurrency} onChange={setSelectedCurrency} />
         </div>
         <div style={{marginBottom: 10, position: 'relative', marginTop: 40}}>
-            <div style={{position: 'absolute', top: -50, right: 0}} className="desktop-only">
+            <div style={{
+                position: 'absolute',
+                top: -50,
+                left: '50%',
+                transform: 'translateX(-50%)'
+            }} className="desktop-only">
                 <Selector options={['1H', '6H', '24H', '7D','30D']} value={selected} onChange={setSelected} />
                 <Selector options={['WPLS', 'USD', 'X']} value={selectedCurrency} onChange={setSelectedCurrency} />
             </div>
@@ -351,6 +389,7 @@ function PricesComponentV2 ({ historyData, priceData, statsData, getImage, pulse
                 selectedCurrency={selectedCurrency}
                 resetHistory={resetHistory}
                 dailyCandles={dailyCandles}
+                hourlyCandles={hourlyCandles}
                 historyPropertyOverride={
                     item.name === 'PLS'
                         ? (selectedCurrency === 'WPLS' ? plsWplsHistoryProperty : plsHistoryProperty)
@@ -372,6 +411,7 @@ function PricesComponentV2 ({ historyData, priceData, statsData, getImage, pulse
                     selectedCurrency={selectedCurrency}
                     resetHistory={resetHistory}
                     dailyCandles={dailyCandles}
+                    hourlyCandles={hourlyCandles}
                     historyPropertyOverride={
                         item.name === 'PLS'
                             ? (selectedCurrency === 'WPLS' ? plsWplsHistoryProperty : plsHistoryProperty)
@@ -603,6 +643,31 @@ function getDailyCandleCloseNearDaysAgo(candles, daysAgo) {
     const close = Number(closest?.close)
     return Number.isFinite(close) && close > 0 ? close : 0
 }
+function getHourlyCandleCloseNearHoursAgo(candles, hoursAgo) {
+    if (!Array.isArray(candles) || candles.length === 0) return 0
+
+    const latestTimestamp = Number(candles[candles.length - 1]?.timestamp)
+    if (!Number.isFinite(latestTimestamp) || latestTimestamp <= 0) return 0
+
+    const targetTime = latestTimestamp - (hoursAgo * 60 * 60 * 1000)
+
+    let closest = null
+    let smallestDiff = Infinity
+
+    for (const item of candles) {
+        const ts = Number(item?.timestamp)
+        if (!Number.isFinite(ts) || ts <= 0) continue
+
+        const diff = Math.abs(ts - targetTime)
+        if (diff < smallestDiff) {
+            smallestDiff = diff
+            closest = item
+        }
+    }
+
+    const close = Number(closest?.close)
+    return Number.isFinite(close) && close > 0 ? close : 0
+}
 function getHistoryValueNearDaysAgo(history, priceProperty, daysAgo, usdSelected, priceModifier) {
     if (!Array.isArray(history) || history.length === 0) return 0
 
@@ -671,14 +736,38 @@ function getHistoryValueNearHoursAgo(history, priceProperty, hoursAgo, usdSelect
 
     return usdSelected ? raw * priceModifier : raw
 }
-function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = false, name, price, priceWPLS, history, longHistory, priceComparison, image, isPls = false, selected, selectedCurrency, lows, bestStable, dailyCandles, candleKey, historyPropertyOverride, percentOverrides }) {    
-    const frozenDenominatorRef = useRef({})
-    
+function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = false, name, price, priceWPLS, history, longHistory, priceComparison, image, isPls = false, selected, selectedCurrency, lows, bestStable, dailyCandles, hourlyCandles, candleKey, historyPropertyOverride, percentOverrides }) {
+    const frozenDenominatorRef = useRef({})    
     const priceModifier = (property) => isPls ? 1 : priceComparison[property]
+    const isUsdPair = tokenInfo?.isUsdPair === true
 
-    const priceProperty = isPls
-        ? (historyPropertyOverride ?? (invert ? 'priceInverted' : 'price'))
-        : (tokenInfo?.invertReserves ? 'priceInverted' : 'price')
+    const priceProperty = (() => {
+        if (isPls) {
+            return historyPropertyOverride ?? (invert ? 'priceInverted' : 'price')
+        }
+
+        if (!isUsdPair) {
+            return tokenInfo?.invertReserves ? 'priceInverted' : 'price'
+        }
+
+        const latest = history?.[history.length - 1]
+        const current = Number(price)
+
+        const direct = Number(latest?.price)
+        const inverted = Number(latest?.priceInverted)
+
+        const directDiff =
+            Number.isFinite(direct) && direct > 0 && Number.isFinite(current) && current > 0
+                ? Math.abs(Math.log(direct / current))
+                : Infinity
+
+        const invertedDiff =
+            Number.isFinite(inverted) && inverted > 0 && Number.isFinite(current) && current > 0
+                ? Math.abs(Math.log(inverted / current))
+                : Infinity
+
+        return directDiff <= invertedDiff ? 'price' : 'priceInverted'
+    })()
 
     const usdSelected = selectedCurrency === 'USD' || selectedCurrency === 'X'
     const isPlsWplsMode = isPls && selectedCurrency === 'WPLS'
@@ -693,38 +782,87 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
                 ? price
                 : priceWPLS
 
+    // ✅ MOVE THIS UP HERE (BEFORE usage)
+    const candleData = dailyCandles?.[candleKey]
+    const hourlyCandleData = hourlyCandles?.[candleKey]
+
+    const rawOneDayPrice =
+        candleData?.length
+            ? getDailyCandleCloseNearDaysAgo(candleData, 1)
+            : 0
+
+    const rawSevenDayPrice =
+        candleData?.length
+            ? getDailyCandleCloseNearDaysAgo(candleData, 7)
+            : 0
+
+    // ✅ NOW SAFE TO USE
+    const rawOneHourPrice =
+    hourlyCandleData?.length
+        ? getHourlyCandleCloseNearHoursAgo(hourlyCandleData, 1)
+        : 0
+
+    const rawSixHourPrice =
+        hourlyCandleData?.length
+            ? getHourlyCandleCloseNearHoursAgo(hourlyCandleData, 6)
+            : 0
+    const rawOneHourPriceWpls =
+        rawOneHourPrice > 0 && priceComparison?.plsLastHourPrice > 0
+            ? rawOneHourPrice / priceComparison.plsLastHourPrice
+            : 0
+
+    const rawSixHourPriceWpls =
+        rawSixHourPrice > 0 && priceComparison?.plsLastSixHourPrice > 0
+            ? rawSixHourPrice / priceComparison.plsLastSixHourPrice
+            : 0
+
+    const rawOneDayPriceWpls =
+        rawOneDayPrice > 0 && priceComparison?.plsLastDayPrice > 0
+            ? rawOneDayPrice / priceComparison.plsLastDayPrice
+            : 0
+            
     const lastHourPrice = isPlsWplsMode
         ? 1
-        : getHistoryValueNearHoursAgo(
-            history,
-            priceProperty,
-            1,
-            usdSelected,
-            usdSelected ? priceModifier('plsLastHourPrice') : 1
-        )
+        : usdSelected && rawOneHourPrice > 0
+        ? rawOneHourPrice
+        : isUsdPair && rawOneHourPriceWpls > 0
+            ? rawOneHourPriceWpls
+            : getHistoryValueNearHoursAgo(
+                history,
+                priceProperty,
+                1,
+                usdSelected,
+                usdSelected ? (isUsdPair ? 1 : priceModifier('plsLastHourPrice')) : 1
+            )
 
     const lastSixHourPrice = isPlsWplsMode
         ? 1
-        : getHistoryValueNearHoursAgo(
-            history,
-            priceProperty,
-            6,
-            usdSelected,
-            usdSelected ? priceModifier('plsLastSixHourPrice') : 1
-        )
+        : usdSelected && rawSixHourPrice > 0
+        ? rawSixHourPrice
+        : isUsdPair && rawSixHourPriceWpls > 0
+            ? rawSixHourPriceWpls
+            : getHistoryValueNearHoursAgo(
+                history,
+                priceProperty,
+                6,
+                usdSelected,
+                usdSelected ? (isUsdPair ? 1 : priceModifier('plsLastSixHourPrice')) : 1
+            )
 
     const lastDayPrice = isPlsWplsMode
         ? 1
-        : getHistoryValueNearHoursAgo(
-            history,
-            priceProperty,
-            24,
-            usdSelected,
-            usdSelected ? priceModifier('plsLastDayPrice') : 1
-        )
-
-    const candleData = dailyCandles?.[candleKey]
-
+        : usdSelected && rawOneDayPrice > 0
+        ? rawOneDayPrice
+        : isUsdPair && rawOneDayPriceWpls > 0
+            ? rawOneDayPriceWpls
+            : getHistoryValueNearHoursAgo(
+                history,
+                priceProperty,
+                24,
+                usdSelected,
+                usdSelected ? (isUsdPair ? 1 : priceModifier('plsLastDayPrice')) : 1
+            )
+            
     const longRangeSource = longHistory?.length ? longHistory : history
 
     const sevenDaySource = isPls ? history : longRangeSource
@@ -736,7 +874,7 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
             priceProperty,
             7,
             usdSelected,
-            usdSelected ? priceModifier('plsSevenDayPrice') : 1
+            usdSelected ? (isUsdPair ? 1 : priceModifier('plsSevenDayPrice')) : 1
         )
 
     const historyThirtyDayPrice = isPlsWplsMode
@@ -746,13 +884,8 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
             priceProperty,
             30,
             usdSelected,
-            usdSelected ? priceModifier('plsThirtyDayPrice') : 1
+            usdSelected ? (isUsdPair ? 1 : priceModifier('plsThirtyDayPrice')) : 1
         )
-
-    const rawSevenDayPrice =
-        candleData?.length
-            ? getDailyCandleCloseNearDaysAgo(candleData, 7)
-            : 0
 
     const rawThirtyDayPrice =
         candleData?.length
@@ -832,7 +965,7 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
     const displayPrice = priceToUse > 999_999 ? fUnit(priceToUse, 2) : formatNumber(priceToUse ?? 0, true, false)
 
     const overridePercentValue =
-        selectedCurrency === 'USD' && !isX
+        selectedCurrency === 'USD' && !isX && name !== 'PRVX'
             ? percentOverrides?.[selected]
             : undefined
 
@@ -893,14 +1026,28 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
 
     const requiredAnchorValue = Number(priceComparison?.[requiredAnchorProperty])
 
+    const hasCandleBackedPercent =
+        selected === '1H' ? rawOneHourPrice > 0 :
+        selected === '6H' ? rawSixHourPrice > 0 :
+        selected === '24H' ? rawOneDayPrice > 0 :
+        selected === '7D' ? rawSevenDayPrice > 0 :
+        selected === '30D' ? rawThirtyDayPrice > 0 :
+        false
+
     const anchorMissingForUsd =
         usdSelected &&
         !isPls &&
+        !isUsdPair &&
+        !hasCandleBackedPercent &&
+        !hasOverridePercent &&
         (!Number.isFinite(requiredAnchorValue) || requiredAnchorValue <= 0)
+
+    const intradayUsdPairWithoutOverride = false
 
     const invalidDenominator =
         anchorMissingForUsd ||
-        !history?.length ||
+        intradayUsdPairWithoutOverride ||
+        (!history?.length && !hasCandleBackedPercent && !hasOverridePercent) ||
         !Number.isFinite(denominator) || denominator <= 0 ||
         !Number.isFinite(percentPrice) || percentPrice <= 0
 
@@ -965,7 +1112,11 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
     const hidePercentForPls = false
 
     return <>
-        <div style={{ padding: '20px 5px 20px 15px', borderRadius: 10 }}>
+        <div style={{
+            padding: '15px 10px',
+            borderRadius: 10,
+            width: '100px'
+        }}>
             <div style={{ position: 'relative' }}>
                 <div>
                     <ImageContainer source={image} alt={name} size={40}/>

@@ -11,6 +11,7 @@ export default function useHistory({ priceData }) {
     const [history, setHistory] = useState({})
     const [chartKeyPoints, setChartKeyPoints] = useState({})
     const [dailyCandles, setDailyCandles] = useState({})
+    const [hourlyCandles, setHourlyCandles] = useState({})
     const [reserves, setReserves] = useState({})
     const isLoading = useRef(false)
     const isLoadingChart = useRef([])
@@ -92,6 +93,7 @@ export default function useHistory({ priceData }) {
     const resetHistory = () => {
         setHistory({})
         setDailyCandles({})
+        setHourlyCandles({})
         setReserves({})
         isLoading.current = false
         isError.current = false
@@ -117,13 +119,15 @@ export default function useHistory({ priceData }) {
                 const bestStableAddress = CANONICAL_WPLS_DAI_PAIR
                 const plsPairId = CANONICAL_WPLS_DAI_PAIR
                 const hexPairId = Object.values(prices).find(p => p.symbol === 'HEX')?.pairId
+                const prvxPairId = '0x7f681a5ad615238357ba148c281e2eaefd2de55a'
 
                 const initialPairs = [
                     plsPairId,
                     bestStableAddress,
                     '0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9', // PLSX
                     '0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa', // INC
-                    hexPairId ?? '0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65' // HEX
+                    hexPairId ?? '0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65', // HEX
+                    prvxPairId // PRVX
                 ].filter((value, index, array) => value && array.indexOf(value) === index)
                 
                 // getChartHistory(bestStableAddress, true, settings)
@@ -133,6 +137,12 @@ export default function useHistory({ priceData }) {
                     fetchDailyCandles('0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9') // PLSX
                     fetchDailyCandles('0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa') // INC
                     fetchDailyCandles(hexPairId ?? '0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65') // HEX
+                    fetchDailyCandles(prvxPairId) // PRVX
+                    fetchHourlyCandles(bestStableAddress) // PLS 1H/6H
+                    fetchHourlyCandles('0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9') // PLSX 1H/6H
+                    fetchHourlyCandles('0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa') // INC 1H/6H
+                    fetchHourlyCandles(hexPairId ?? '0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65') // HEX 1H/6H
+                    fetchHourlyCandles(prvxPairId) // PRVX 1H/6H
 
                     const results = await Promise.allSettled(
                         initialPairs.map(address => getHistory(address, false, settings))
@@ -376,14 +386,26 @@ export default function useHistory({ priceData }) {
     }, [prices])
     const fetchDailyCandles = async (lpAddress) => {
     try {
-        const isWplsDaiPair =
-            lpAddress?.toLowerCase() === '0xe56043671df55de5cdf8459710433c10324de0ae'
+        const normalizedLp = lpAddress?.toLowerCase()
 
-        const tokenParam = isWplsDaiPair ? 'quote' : 'base'
+        const isWplsDaiPair =
+            normalizedLp === '0xe56043671df55de5cdf8459710433c10324de0ae'
+
+        const isPrvxUsdcPair =
+            normalizedLp === '0x7f681a5ad615238357ba148c281e2eaefd2de55a'
+
+        const tokenParam = (isWplsDaiPair || isPrvxUsdcPair) ? 'quote' : 'base'
         const url = `https://api.geckoterminal.com/api/v2/networks/pulsechain/pools/${lpAddress}/ohlcv/day?aggregate=1&limit=100&currency=usd&token=${tokenParam}&include_empty_intervals=true`
 
-        const res = await fetch(url)
-        const json = await res.json()
+        const raw =
+            window?.electron?.getFile
+                ? await window.electron.getFile(url)
+                : await fetch(url).then(res => res.json())
+
+        const json =
+            typeof raw === 'string'
+                ? JSON.parse(raw)
+                : raw
 
         const candles = json?.data?.attributes?.ohlcv_list ?? []
 
@@ -406,7 +428,44 @@ export default function useHistory({ priceData }) {
     } catch (err) {
         console.error('Failed to fetch Gecko candles:', lpAddress, err)
     }
-}
+    }
+        const fetchHourlyCandles = async (lpAddress) => {
+        try {
+            const normalizedLp = lpAddress?.toLowerCase()
+
+            const isWplsDaiPair =
+                normalizedLp === '0xe56043671df55de5cdf8459710433c10324de0ae'
+
+            const isPrvxUsdcPair =
+                normalizedLp === '0x7f681a5ad615238357ba148c281e2eaefd2de55a'
+
+            const tokenParam = (isWplsDaiPair || isPrvxUsdcPair) ? 'quote' : 'base'
+            const url = `https://api.geckoterminal.com/api/v2/networks/pulsechain/pools/${lpAddress}/ohlcv/hour?aggregate=1&limit=72&currency=usd&token=${tokenParam}&include_empty_intervals=true`
+
+            const res = await fetch(url)
+            const json = await res.json()
+
+            const candles = json?.data?.attributes?.ohlcv_list ?? []
+
+            const parsed = candles
+                .map(c => ({
+                    timestamp: c[0] * 1000,
+                    open: c[1],
+                    high: c[2],
+                    low: c[3],
+                    close: c[4],
+                    volume: c[5]
+                }))
+                .sort((a, b) => a.timestamp - b.timestamp)
+
+            setHourlyCandles(prev => ({
+                ...prev,
+                [lpAddress]: parsed
+            }))
+        } catch (err) {
+            console.error('Failed to fetch Gecko hourly candles:', lpAddress, err)
+        }
+    }
 
     const getChartHistory = useCallback(async (lpAddress, saveToState = true, settings = defaultSettings) => {
         const loadingChart = isLoadingChart.current.find(f => f === lpAddress?.toLowerCase()) ? true : false
@@ -799,6 +858,7 @@ export default function useHistory({ priceData }) {
             history,
             chartKeyPoints,
             dailyCandles,
+            hourlyCandles,
             getHistory,
             getChartHistory,
             fetchDailyCandles,

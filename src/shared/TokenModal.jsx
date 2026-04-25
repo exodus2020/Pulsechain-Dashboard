@@ -161,7 +161,9 @@ function TokenModal({ balanceData, historyData, bestStable }) {
   const token1reserves = Number(m.reserve1) / 10**Number(m.token1.decimals)
 
   const isDefaultToken = defaultTokenInformation?.[address.toLowerCase()] ? true : false;
-  const watchlistData = context?.data?.watchlist?.[m.pairId.toLowerCase()]
+  const watchlistData =
+    context?.data?.watchlist?.[m?.pairId?.toLowerCase()] ||
+    context?.data?.watchlist?.[address?.toLowerCase()]
 
   const displayPriceUsd = formatNumber(m?.priceUsd ?? 0, true, true)
   const [pools, setPools] = useState(false)
@@ -299,15 +301,17 @@ function TokenModal({ balanceData, historyData, bestStable }) {
                   })}
                 </div>
               </div>}
-              {watchlistData ? <div style={{ marginTop: 10 }}>
-              <Button style={{ width: 180, textAlign: 'center', display: 'inline-block'}}
-                onClick={() => {
-                    context?.toggleWatchlist(watchlistData)
+              <div style={{ marginTop: 10 }}>
+                <Button
+                  style={{ width: 180, textAlign: 'center', display: 'inline-block'}}
+                  onClick={() => {
+                    context?.toggleWatchlist(watchlistData || m)
                     setModal(null)
-                  }}>
+                  }}
+                >
                   Remove from List
-              </Button>
-            </div> : ''}
+                </Button>
+              </div>
             </div>
           </div>
         </div>

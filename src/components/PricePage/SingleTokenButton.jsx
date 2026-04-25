@@ -1,3 +1,4 @@
+// SingleTokenButton.jsx
 import React, { memo } from "react";
 import Button from "../Button";
 import ImageContainer from "../ImageContainer";
@@ -18,6 +19,7 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
         const tokenToUse = isToken0Wpls ? watchlistData?.token1 : watchlistData?.token0
 
         const image = getImage((tokenToUse?.id ?? '')?.toLowerCase())
+
         return <Button
             key={`p-${pairId}-${tokenToUse?.id}`}
             style={{
@@ -25,6 +27,9 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
                 padding: '15px 25px',
                 position: 'relative',
                 background: background
+            }}
+            onClick={() => {
+                setSingleTokenModal(watchlistData)
             }}
         >
             <div className="price-button" style={{ position: 'relative' }}>
@@ -80,7 +85,7 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
                 position: 'relative',
             }}
             onClick={() => {
-                setSingleTokenModal(priceInfo);
+                setSingleTokenModal(priceInfo || watchlistData);
             }}
         >
             <div className="price-button">

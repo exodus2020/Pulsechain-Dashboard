@@ -1,7 +1,9 @@
+// tokens.js
 import ImgHEX from "../icons/hex.png"
 import ImgPLSX from "../icons/plsx.png"
 import ImgINC from "../icons/inc.png"
 import ImgPLS from "../icons/pls.png"
+import ImgPRVX from "../icons/prvx.png"
 import ImgDAI from "../icons/dai.png"
 import ImgUSDC from "../icons/usdc.png"
 import ImgUSDT from "../icons/usdt.png"
@@ -192,6 +194,13 @@ export const defaultTokenInformation = {
         decimals: 8,
         factor: 10**9,
         icon: ImgHEX
+    },
+    '0xf6f8db0aba00007681f8faf16a0fda1c9b030b11': {
+        name: 'ProveX',
+        symbol: 'PRVX',
+        decimals: 18,
+        factor: .1,
+        icon: ImgPRVX
     },
     '0xefd766ccb38eaf1dfd701853bfce31359239f305': {
       name: 'DAI Stablecoin from Ethereum',

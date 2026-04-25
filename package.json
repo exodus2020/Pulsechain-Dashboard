@@ -1,6 +1,6 @@
 {
   "name": "pulsechain-dashboard",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "main": "./src/main.js",
   "author": "",
   "license": "ISC",
@@ -42,10 +42,12 @@
   "build": {
     "appId": "com.pulsechain-dashboard",
     "productName": "PulseChain Dashboard",
+    "icon": "logo.ico",
 
     "directories": {
-      "output": "dist_electron"
-    },
+    "output": "dist_electron",
+    "buildResources": "src/icons"
+  },
 
     "files": [
       "dist/**/*",
@@ -55,7 +57,11 @@
     ],
 
     "win": {
-      "target": "nsis"
-    }
+    "target": [
+      "nsis",
+      "portable"
+    ],
+    "icon": "logo.ico"
+  }
   }
 }

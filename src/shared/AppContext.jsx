@@ -203,6 +203,7 @@ export const AppContextProvider = ({ children }) => {
     useEffect(() => {
         const initialLoad = async () => {
             await loadData()
+            await updateImageUrReference() // 🔥 add this line
             setInit(true)
         }
 
@@ -446,20 +447,21 @@ export function useAppContext() {
         
         if (!settings?.config?.tokenImagesEnabled) return ImgQuestion
 
-        if (!Array.isArray(context?.data?.imageRef) && !Array.isArray(tokenref)) return ImgQuestion
+        const list = context?.data?.imageRef?.length
+            ? context.data.imageRef
+            : tokenref || []
     
         try {
-          const token = (context?.data?.imageRef || []).find(f => f.address.toLowerCase() == address.toLocaleLowerCase())
-          const fallback = (tokenref || []).find(f => f.address.toLowerCase() == address.toLowerCase())
+            const token = list.find(f => f.address.toLowerCase() === address.toLowerCase())
 
-          const tokenUrl = token?.url ?? fallback?.logoURI
-    
-          if (!tokenUrl) return ImgQuestion
-    
-          return tokenUrl
-        } catch {
-          return ImgQuestion // undefined
-        }
+            const tokenUrl = token?.url || token?.logoURI
+
+            if (!tokenUrl) return ImgQuestion
+
+            return tokenUrl
+            } catch {
+            return ImgQuestion
+            }
     }
 
     const getTokenInfo = (address) => {

@@ -1,3 +1,4 @@
+// TokenPie.jsx
 import { memo, useMemo, useState, useEffect, useRef } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Sector, Legend } from 'recharts';
 import styled from 'styled-components';
@@ -199,41 +200,53 @@ const TokenPieChart = memo(function TokenPieChart({ balances, aliases = {} }) {
   }
 
   return (
-    <ChartContainer>
-      <h3 style={{ margin: '0 0 10px 0', textAlign: 'center' }}>Wallet Distribution</h3>
-      <ResponsiveContainer width="100%" height="90%">
-        <PieChart>
-          <Pie
-            data={chartData}
-            cx="50%"
-            cy="50%"
-            outerRadius={80}
-            fill="#8884d8"
-            dataKey="value"
-            minAngle={3}
-            activeIndex={activeIndex}
-            activeShape={renderActiveShape}
-          >
-            {chartData.map((_, index) => (
-              <Cell key={`cell-${index}`} fill={getColor(index)} />
-            ))}
-          </Pie>
-          <Legend
-            layout="vertical"
-            verticalAlign="middle"
-            align="right"
-            wrapperStyle={{ color: 'white', fontSize: '12px' }}
-            formatter={(value, entry) =>
-              entry?.payload?.address
-                ? `${shortenString(aliases[entry.payload.address.toLowerCase()] ?? entry.payload.address)} - $${fUnit(parseFloat(entry.payload.balanceUsd), 0)}`
-                : 'Unknown'
-            }
-          />
-          <Tooltip content={<CustomTooltipContent />} />
-        </PieChart>
-      </ResponsiveContainer>
-    </ChartContainer>
-  );
+  <ChartContainer>
+    <h3 style={{ margin: '0 0 10px 0', textAlign: 'center' }}>
+      Wallet Distribution
+    </h3>
+
+    {chartData.length > 0 && (
+      <div style={{ width: '100%', height: 250 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={chartData}
+              cx="50%"
+              cy="50%"
+              outerRadius={80}
+              fill="#8884d8"
+              dataKey="value"
+              minAngle={3}
+              activeIndex={activeIndex}
+              activeShape={renderActiveShape}
+            >
+              {chartData.map((_, index) => (
+                <Cell key={`cell-${index}`} fill={getColor(index)} />
+              ))}
+            </Pie>
+
+            <Legend
+              layout="vertical"
+              verticalAlign="middle"
+              align="right"
+              wrapperStyle={{ color: 'white', fontSize: '12px' }}
+              formatter={(value, entry) =>
+                entry?.payload?.address
+                  ? `${shortenString(
+                      aliases[entry.payload.address.toLowerCase()] ??
+                      entry.payload.address
+                    )} - $${fUnit(parseFloat(entry.payload.balanceUsd), 0)}`
+                  : 'Unknown'
+              }
+            />
+
+            <Tooltip content={<CustomTooltipContent />} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+    )}
+  </ChartContainer>
+);
 });
 
 export default memo(TokenPie);

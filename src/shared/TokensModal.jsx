@@ -132,8 +132,16 @@ function TokensModal({ wplsPrice }) {
 
         const filteredResults = []
         sorted.forEach(m => {
-            if (filteredResults.some(f => f?.pairId == m?.pairId && f?.version == m?.version)) return
-            filteredResults.push({...m})
+            const isToken0Wpls = m?.token0?.id === '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
+            const tokenAddress = (isToken0Wpls ? m?.token1?.id : m?.token0?.id)?.toLowerCase()
+
+            if (filteredResults.some(f => {
+                const fIsToken0Wpls = f?.token0?.id === '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
+                const fAddress = (fIsToken0Wpls ? f?.token1?.id : f?.token0?.id)?.toLowerCase()
+                return fAddress === tokenAddress
+            })) return
+
+            filteredResults.push({ ...m })
         })
 
         setResults(filteredResults)
