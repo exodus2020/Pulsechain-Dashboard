@@ -7,6 +7,39 @@ import { defaultSettings } from '../config/settings'
 import { appSettingsAtom } from '../store'
 import { useAtom } from 'jotai'
 
+const CACHE_PREFIX = 'pls_candles_'
+const CACHE_TTL = 1000 * 60 * 30 // 30 minutes
+
+const getCacheKey = (type, lp) => `${CACHE_PREFIX}${type}_${lp}`
+
+const loadCached = (type, lp) => {
+    try {
+        const raw = localStorage.getItem(getCacheKey(type, lp))
+        if (!raw) return null
+
+        const parsed = JSON.parse(raw)
+        if (!parsed?.data || !parsed?.timestamp) return null
+
+        if (Date.now() - parsed.timestamp > CACHE_TTL) return null
+
+        return parsed.data
+    } catch {
+        return null
+    }
+}
+
+const saveCached = (type, lp, data) => {
+    try {
+        localStorage.setItem(
+            getCacheKey(type, lp),
+            JSON.stringify({
+                data,
+                timestamp: Date.now()
+            })
+        )
+    } catch {}
+}
+
 export default function useHistory({ priceData }) {
     const [history, setHistory] = useState({})
     const [chartKeyPoints, setChartKeyPoints] = useState({})
@@ -119,7 +152,7 @@ export default function useHistory({ priceData }) {
                 const bestStableAddress = CANONICAL_WPLS_DAI_PAIR
                 const plsPairId = CANONICAL_WPLS_DAI_PAIR
                 const hexPairId = Object.values(prices).find(p => p.symbol === 'HEX')?.pairId
-                const prvxPairId = '0x7f681a5ad615238357ba148c281e2eaefd2de55a'
+                const prvxPairId = Object.values(prices).find(p => p.symbol === 'PRVX')?.pairId
 
                 const initialPairs = [
                     plsPairId,
@@ -385,65 +418,33 @@ export default function useHistory({ priceData }) {
         
     }, [prices])
     const fetchDailyCandles = async (lpAddress) => {
-    try {
-        const normalizedLp = lpAddress?.toLowerCase()
+        const cached = loadCached('daily', lpAddress)
+        if (cached) {
+            setDailyCandles(prev => ({
+                ...prev,
+                [lpAddress]: cached
+            }))
+            return // 🚀 skip fetch if cache is fresh
+        }
 
-        const isWplsDaiPair =
-            normalizedLp === '0xe56043671df55de5cdf8459710433c10324de0ae'
-
-        const isPrvxUsdcPair =
-            normalizedLp === '0x7f681a5ad615238357ba148c281e2eaefd2de55a'
-
-        const tokenParam = (isWplsDaiPair || isPrvxUsdcPair) ? 'quote' : 'base'
-        const url = `https://api.geckoterminal.com/api/v2/networks/pulsechain/pools/${lpAddress}/ohlcv/day?aggregate=1&limit=100&currency=usd&token=${tokenParam}&include_empty_intervals=true`
-
-        const raw =
-            window?.electron?.getFile
-                ? await window.electron.getFile(url)
-                : await fetch(url).then(res => res.json())
-
-        const json =
-            typeof raw === 'string'
-                ? JSON.parse(raw)
-                : raw
-
-        const candles = json?.data?.attributes?.ohlcv_list ?? []
-
-        // Format: [timestamp, open, high, low, close, volume]
-        const parsed = candles
-        .map(c => ({
-            timestamp: c[0] * 1000,
-            open: c[1],
-            high: c[2],
-            low: c[3],
-            close: c[4],
-            volume: c[5]
-    }))
-    .sort((a, b) => a.timestamp - b.timestamp)
-
-        setDailyCandles(prev => ({
-            ...prev,
-            [lpAddress]: parsed
-        }))
-    } catch (err) {
-        console.error('Failed to fetch Gecko candles:', lpAddress, err)
-    }
-    }
-        const fetchHourlyCandles = async (lpAddress) => {
         try {
             const normalizedLp = lpAddress?.toLowerCase()
 
             const isWplsDaiPair =
                 normalizedLp === '0xe56043671df55de5cdf8459710433c10324de0ae'
 
-            const isPrvxUsdcPair =
-                normalizedLp === '0x7f681a5ad615238357ba148c281e2eaefd2de55a'
+            const tokenParam = isWplsDaiPair ? 'quote' : 'base'
+            const url = `https://api.geckoterminal.com/api/v2/networks/pulsechain/pools/${lpAddress}/ohlcv/day?aggregate=1&limit=100&currency=usd&token=${tokenParam}&include_empty_intervals=true`
 
-            const tokenParam = (isWplsDaiPair || isPrvxUsdcPair) ? 'quote' : 'base'
-            const url = `https://api.geckoterminal.com/api/v2/networks/pulsechain/pools/${lpAddress}/ohlcv/hour?aggregate=1&limit=72&currency=usd&token=${tokenParam}&include_empty_intervals=true`
+            const raw =
+                window?.electron?.getFile
+                    ? await window.electron.getFile(url)
+                    : await fetch(url).then(res => res.json())
 
-            const res = await fetch(url)
-            const json = await res.json()
+            const json =
+                typeof raw === 'string'
+                    ? JSON.parse(raw)
+                    : raw
 
             const candles = json?.data?.attributes?.ohlcv_list ?? []
 
@@ -458,14 +459,68 @@ export default function useHistory({ priceData }) {
                 }))
                 .sort((a, b) => a.timestamp - b.timestamp)
 
-            setHourlyCandles(prev => ({
+            setDailyCandles(prev => ({
                 ...prev,
                 [lpAddress]: parsed
             }))
+
+            saveCached('daily', lpAddress, parsed)
         } catch (err) {
-            console.error('Failed to fetch Gecko hourly candles:', lpAddress, err)
+            console.error('Failed to fetch Gecko candles:', lpAddress, err)
         }
     }
+        const fetchHourlyCandles = async (lpAddress) => {
+            const cached = loadCached('hourly', lpAddress)
+            if (cached) {
+                setHourlyCandles(prev => ({
+                    ...prev,
+                    [lpAddress]: cached
+                }))
+                return
+            }
+
+            try {
+                const normalizedLp = lpAddress?.toLowerCase()
+
+                const isWplsDaiPair =
+                    normalizedLp === '0xe56043671df55de5cdf8459710433c10324de0ae'
+
+                const tokenParam = isWplsDaiPair ? 'quote' : 'base'
+                const url = `https://api.geckoterminal.com/api/v2/networks/pulsechain/pools/${lpAddress}/ohlcv/hour?aggregate=1&limit=72&currency=usd&token=${tokenParam}&include_empty_intervals=true`
+
+                const raw =
+                    window?.electron?.getFile
+                        ? await window.electron.getFile(url)
+                        : await fetch(url).then(res => res.json())
+
+                const json =
+                    typeof raw === 'string'
+                        ? JSON.parse(raw)
+                        : raw
+
+                const candles = json?.data?.attributes?.ohlcv_list ?? []
+
+                const parsed = candles
+                    .map(c => ({
+                        timestamp: c[0] * 1000,
+                        open: c[1],
+                        high: c[2],
+                        low: c[3],
+                        close: c[4],
+                        volume: c[5]
+                    }))
+                    .sort((a, b) => a.timestamp - b.timestamp)
+
+                setHourlyCandles(prev => ({
+                    ...prev,
+                    [lpAddress]: parsed
+                }))
+
+                saveCached('hourly', lpAddress, parsed)
+            } catch (err) {
+                console.error('Failed to fetch Gecko hourly candles:', lpAddress, err)
+            }
+        }
 
     const getChartHistory = useCallback(async (lpAddress, saveToState = true, settings = defaultSettings) => {
         const loadingChart = isLoadingChart.current.find(f => f === lpAddress?.toLowerCase()) ? true : false

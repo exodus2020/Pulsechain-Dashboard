@@ -1,4 +1,4 @@
-/// LeftNavigation.jsx
+// LeftNavigation.jsx
 import styled from "styled-components"
 import { menuOptions } from "../config/menu-options" 
 import Icon from "../components/Icon"
@@ -7,7 +7,7 @@ import { useAtom } from "jotai"
 import { icons_list } from "../config/icons"
 import { useModals } from "../hooks/useModals"
 import version from "../config/version.json"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Tooltip from "./Tooltip"
 
 const Wrapper = styled.div`
@@ -148,11 +148,40 @@ export function LeftNavigation({ fees, toggleMode }) {
 
     const { estimatedFees, loading, error } = fees
     const [ gitlabVersion, setGitlabVersion ] = useState(null)
+    useEffect(() => {
+        handleCheckForUpdates()
+    }, [])
+
+    const DEV_ADDRESS = "0xb7c85151e4eeD387837B54fD252ff63C4496Fd58"
+    const [copied, setCopied] = useState(false)
+
+    const handleCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(DEV_ADDRESS)
+            setCopied(true)
+            setTimeout(() => setCopied(false), 2000)
+        } catch (err) {
+            console.error("Copy failed", err)
+        }
+    }
 
     const handleOpenGitlab = async () => {
         await window.electron.openExternal('https://github.com/exodus2020/Pulsechain-Dashboard')
     }
+    const isRemoteNewer = (remote, local) => {
+        const r = String(remote).split('.').map(Number)
+        const l = String(local).split('.').map(Number)
 
+        for (let i = 0; i < Math.max(r.length, l.length); i++) {
+            const rv = r[i] || 0
+            const lv = l[i] || 0
+
+            if (rv > lv) return true
+            if (rv < lv) return false
+        }
+
+        return false
+    }
     const handleCheckForUpdates = async () => {
         setGitlabVersion('checking')
 
@@ -166,7 +195,7 @@ export function LeftNavigation({ fees, toggleMode }) {
 
             if (
                 nextVersion !== 'error' &&
-                version.version !== nextVersion
+                isRemoteNewer(nextVersion, version.version)
             ) {
                 await window.electron.openExternal('https://github.com/exodus2020/Pulsechain-Dashboard/releases')
             }
@@ -203,7 +232,7 @@ export function LeftNavigation({ fees, toggleMode }) {
                             <Icon icon={icons_list['pip-in']} size={20}/>
                         </div>
                     </div>} */}
-                    <div style={{ position: 'absolute', bottom: 55, right: 0, padding: 10 }}>
+                    <div style={{ position: 'absolute', bottom: expanded ? 170 : 55, right: 0, padding: 10 }}>
                         {expanded ? <div style={{ position: 'relative', color: 'rgb(150,150,150)' }}>
                             {estimatedFees?.slow?.baseFee ? <span style={{ fontSize: 14, marginRight: 28, whiteSpace: 'nowrap' }}>
                                 {parseFloat(Math.round(estimatedFees?.slow?.baseFee / 1_000) / 1_000).toFixed(2)} mB
@@ -226,7 +255,7 @@ export function LeftNavigation({ fees, toggleMode }) {
                         </div>}
                     </div>
                 </div>
-                <div className="nav-footer" style={{ minHeight: 40 }}>
+                <div className="nav-footer" style={{ minHeight: expanded ? 145 : 40 }}>
                     <div>
                         <div style={{ textAlign: 'left', paddingLeft: 9}}>
                             <Tooltip content="Open GitHub" placement="right">
@@ -239,28 +268,69 @@ export function LeftNavigation({ fees, toggleMode }) {
                                 </div>
                             </Tooltip>
                         </div>
+
+                        {expanded && (
+                            <div style={{
+                                marginTop: 10,
+                                padding: '8px 10px',
+                                textAlign: 'center'
+                            }}>
+                                <div style={{
+                                    fontSize: 12,
+                                    color: 'rgb(150,150,150)',
+                                    marginBottom: 6
+                                }}>
+                                    Support the developer
+                                </div>
+
+                                <button
+                                    onClick={handleCopy}
+                                    style={{
+                                        width: '100%',
+                                        padding: '8px',
+                                        background: 'rgb(30,30,30)',
+                                        border: '1px solid rgb(50,50,50)',
+                                        borderRadius: 6,
+                                        color: 'white',
+                                        fontSize: 12,
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    {copied ? 'Copied ✔' : 'Copy Address'}
+                                </button>
+
+                                <div style={{
+                                    marginTop: 4,
+                                    fontSize: 10,
+                                    color: 'rgb(100,100,100)'
+                                }}>
+                                    {DEV_ADDRESS.slice(0,6)}...{DEV_ADDRESS.slice(-4)}
+                                </div>
+                            </div>
+                        )}
+
                         <div className="mute version" style={expanded ? { left: 15, top: 33 } : { left: 15, top: 33 }}>
                             <div onClick={handleCheckForUpdates}>
                                 v{version.version}
                             </div>
                         </div>
+
                         <div className="mute version" style={expanded ? { right: 12, top: 33, opacity: 1 } : { right: -85, top: 33, opacity: 0, pointerEvents: 'none' }}>
                             <div>
-                                <span className="text-link" onClick={handleCheckForUpdates}>
+                                <span>
                                     {gitlabVersion === 'checking'
-                                        ? 'Checking...'
-                                        : gitlabVersion === 'error'
-                                        ? 'Update check failed'
-                                        : gitlabVersion && version.version !== gitlabVersion
-                                        ? `Update Available v${gitlabVersion}`
-                                        : gitlabVersion && version.version === gitlabVersion
-                                        ? 'No Updates Available'
-                                        : 'Check for Updates'}
+                                    ? 'Checking for update...'
+                                    : gitlabVersion === 'error'
+                                    ? 'Update check failed'
+                                    : gitlabVersion && isRemoteNewer(gitlabVersion, version.version)
+                                    ? `Update Available (v${gitlabVersion})`
+                                    : gitlabVersion
+                                    ? 'Up To Date'
+                                    : 'Checking for update...'}
                                 </span>
                             </div>
                         </div>
                     </div>
-    
                 </div>
             </div>
         </Wrapper>

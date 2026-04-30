@@ -6,6 +6,30 @@ Privacy-first portfolio tracker for PulseChain assets with real-time pricing and
 
 ---
 
+## 🚀 v2.1.1 — Performance & Accuracy Patch
+
+This patch focuses on improving performance, fixing calculation edge cases, and polishing the overall user experience.
+
+### 🔧 Improvements
+- Added smart candle caching for faster startup and reduced API calls
+- Wallet % change now calculated across **all tokens**, not just core assets
+- Improved reliability of price calculations using historical data
+- Automatic update check on startup (no manual interaction required)
+
+### 🎨 UI/UX
+- Added **“Support the developer”** section with copy-to-clipboard
+- Improved loading indicator positioning and alignment
+- Fixed sidebar layout issues and spacing inconsistencies
+- Better visual feedback for update status (“Up To Date” / “Update Available”)
+
+### 🐛 Fixes
+- Fixed PRVX % showing incorrect values (including -100% bug)
+- Fixed WPLS % inconsistencies and delayed calculations
+- Fixed chart-related crashes when loading certain tokens
+- Resolved multiple console errors and edge case failures
+
+---
+
 ## 🚀 v2.1.0 — Stability & Charting Update
 
 This release focuses on improving reliability, performance, and overall user experience.

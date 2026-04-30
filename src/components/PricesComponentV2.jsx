@@ -46,27 +46,17 @@ const Wrapper = styled.div`
         box-shadow: 0 1px 4px rgba(255, 255, 255, 0.1);
     }
 
-    .loading-container {
-        position: absolute;
-        right: 5px;
-        top: -5px;
-        height: 10px;
-        .loading-bar-div {
-            height: 16px;
-            margin-top: 10px;
-            width: 40px;
-        }
+    .loading-bar-div {
+        display: inline-flex;
+        align-items: center;
+        height: 12px;
+        width: 36px;
+        transform: translateY(-5px);
     }
 
     @media (max-width: 650px) {
         min-width: calc( 100dvw - 40px );
         max-width: calc( 100dvw - 40px );
-        .loading-container {
-            position: absolute;
-            left: 90px;
-            top: -5px;
-            height: 10px;
-        }
         .price-grid {
             grid-template-columns: 1fr 1fr;
         }
@@ -193,12 +183,9 @@ function PricesComponentV2 ({ historyData, priceData, statsData, getImage, pulse
             name: 'PRVX',
             price: prvxPrice?.priceUsd,
             priceWPLS: prvxPrice?.priceWpls,
-            history: chartKeyPoints?.['0x7f681a5ad615238357ba148c281e2eaefd2de55a'] ?? [],
-            candleKey: '0x7f681a5ad615238357ba148c281e2eaefd2de55a',
-            tokenInfo: {
-                ...prvxPrice,
-                isUsdPair: true
-            },
+            history: chartKeyPoints?.[prvxPrice?.pairId] ?? [],
+            candleKey: prvxPrice?.pairId,
+            tokenInfo: prvxPrice,
             lows: {
                 price: 0,
                 priceWPLS: 0,
@@ -1122,7 +1109,16 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
                     <ImageContainer source={image} alt={name} size={40}/>
                 </div>
                 <div style={{ position: 'absolute', left: 50, top: 0 }}>
-                    {name}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        {name}
+                        {rowIsLoading ? (
+                            <Tooltip content="Loading Historical Data...">
+                                <span className="loading-bar-div">
+                                    <LoadingBar estTime={13} completed={!rowIsLoading}/>
+                                </span>
+                            </Tooltip>
+                        ) : null}
+                    </span>
                     {!hidePercentForPls && shouldShowPercent ? (
                         <div style={{ position: 'absolute', right: -10, top: 0, transform: 'translateX(100%)' }}>
                             <span style={{ color: displayPercentColor }}>
@@ -1137,13 +1133,7 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
                         </div>
                     ) : null}
                 </div>
-                    {rowIsLoading ? <div className="loading-container">
-                        <Tooltip content="Loading Historical Data...">
-                            <div className='loading-bar-div'>
-                                <LoadingBar estTime={13} completed={!rowIsLoading}/>
-                            </div>
-                        </Tooltip>
-                    </div> : <></>}
+                    <></>
                 <div style={{ position: 'absolute', left: 50, bottom: 0 }}>
                     <div>
                         <span style={{ fontSize: 15, letterSpacing: 1, whiteSpace: 'nowrap' }}>

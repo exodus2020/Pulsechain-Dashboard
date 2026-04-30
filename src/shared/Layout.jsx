@@ -1,3 +1,4 @@
+// Layout.jsx
 import { LeftNavigation } from './LeftNavigation'
 import styled from 'styled-components'
 import 'typeface-raleway'

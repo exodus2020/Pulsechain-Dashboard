@@ -101,7 +101,7 @@ export const AppContextProvider = ({ children }) => {
                 setData(JSON.parse(response ?? {}))
                 setUpdate(prev => prev + 1)
             } catch (err) {
-                // failed to parse the JSON - issue w/ file 
+                console.error('Failed to parse unencrypted file:', err)
             }
             
         } else {
@@ -179,11 +179,17 @@ export const AppContextProvider = ({ children }) => {
 
         try {
             const pulsechainTokens = 'https://gib.show/list/merged/5ff74ffa222c6c435c9432ad937c5d95e3327ebbe3eb9ff9f62a4d940d5790f9?chainId=369'
-            const response = await fetchTokenList(pulsechainTokens);
+            let response
+
+            if (window?.electron?.getFile) {
+                const raw = await window.electron.getFile(pulsechainTokens)
+                response = typeof raw === 'string' ? JSON.parse(raw) : raw
+            } else {
+                response = await fetchTokenList(pulsechainTokens)
+            }
 
             if (response) {
                 saveDataUnencrypted(response, 'tokenRef')
-                setTokenref(response)
 
                 setData(prev => {        
                     const newData = {...prev, imageRef: response}
@@ -193,7 +199,7 @@ export const AppContextProvider = ({ children }) => {
                 setUrlsFetched(true)
             }
         } catch (err) {
-            console.error('Error fetching token list')
+            console.error('Error fetching token list:', err)
         }
         setLoading(false)
       };
@@ -203,7 +209,11 @@ export const AppContextProvider = ({ children }) => {
     useEffect(() => {
         const initialLoad = async () => {
             await loadData()
-            await updateImageUrReference() // 🔥 add this line
+            try {
+    await updateImageUrReference() // 🔥 add this line
+        } catch (e) {
+            console.warn('Token image fetch failed, continuing...')
+        } 
             setInit(true)
         }
 

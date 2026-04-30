@@ -3,7 +3,7 @@ import styled from "styled-components"
 import Button from "../components/Button"
 import { defaultTokenInformation, liquidityPairs } from "../lib/tokens"
 import { formatDatetime } from "../lib/date"
-import { hiddenWalletsAtom, hideHexMinersAtom, hideZeroValueAtom, liquiditySearchModalAtom, tokensModalAtom, walletsModalAtom } from "../store"
+import { hiddenWalletsAtom, hideHexMinersAtom, hideZeroValueAtom, liquiditySearchModalAtom, tokensModalAtom, walletsModalAtom, timeframeAtom } from "../store"
 import { useAtom } from "jotai"
 import { useAppContext } from "../shared/AppContext"
 import Tooltip from "../shared/Tooltip"
@@ -81,6 +81,58 @@ const Wrapper = styled.div`
         // }
     }
 `
+function getDailyCandleCloseNearDaysAgo(candles, daysAgo) {
+    if (!Array.isArray(candles) || candles.length === 0) return 0
+
+    const latestTimestamp = Number(candles[candles.length - 1]?.timestamp)
+    if (!Number.isFinite(latestTimestamp) || latestTimestamp <= 0) return 0
+
+    const targetTime = latestTimestamp - (daysAgo * 24 * 60 * 60 * 1000)
+
+    let closest = null
+    let smallestDiff = Infinity
+
+    for (const item of candles) {
+        const ts = Number(item?.timestamp)
+        if (!Number.isFinite(ts) || ts <= 0) continue
+
+        const diff = Math.abs(ts - targetTime)
+        if (diff < smallestDiff) {
+            smallestDiff = diff
+            closest = item
+        }
+    }
+
+    const close = Number(closest?.close)
+    return Number.isFinite(close) && close > 0 ? close : 0
+}
+
+function getHourlyCandleCloseNearHoursAgo(candles, hoursAgo) {
+    if (!Array.isArray(candles) || candles.length === 0) return 0
+
+    const latestTimestamp = Number(candles[candles.length - 1]?.timestamp)
+    if (!Number.isFinite(latestTimestamp) || latestTimestamp <= 0) return 0
+
+    const targetTime = latestTimestamp - (hoursAgo * 60 * 60 * 1000)
+
+    let closest = null
+    let smallestDiff = Infinity
+
+    for (const item of candles) {
+        const ts = Number(item?.timestamp)
+        if (!Number.isFinite(ts) || ts <= 0) continue
+
+        const diff = Math.abs(ts - targetTime)
+        if (diff < smallestDiff) {
+            smallestDiff = diff
+            closest = item
+        }
+    }
+
+    const close = Number(closest?.close)
+    return Number.isFinite(close) && close > 0 ? close : 0
+}
+
 export default memo(WalletsPage)
 function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, hexData}) {
     const { pricePairs, prices, priceLastUpdated } = priceData
@@ -97,6 +149,7 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
     const watchlist = data?.watchlist ?? {}
     const [ hideZeroValue, setHideZeroValue ] = useAtom(hideZeroValueAtom)
     const [ hideHexMiners, setHideHexMiners ] = useAtom(hideHexMinersAtom)
+    const [ selectedTimeframe ] = useAtom(timeframeAtom)
     const [ pulseMetrics, setPulseMetrics ] = useState([])
     const [ cachedPulseOverrides, setCachedPulseOverrides ] = useState(() => {
         try {
@@ -120,7 +173,7 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
 
             const rebuilt = cachedRows.reduce((acc, coin) => {
             const symbol = coin?.symbol
-            if (!['PLS', 'WPLS', 'PLSX', 'INC', 'HEX'].includes(symbol)) return acc
+            if (!['PLS', 'WPLS', 'PLSX', 'INC', 'HEX', 'PRVX'].includes(symbol)) return acc
 
             if (symbol === 'WPLS' && acc.PLS) {
                 return acc
@@ -176,6 +229,90 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
     const incPriceUsd = Number(prices?.['0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d']?.priceUsd ?? 0)
 
     const grandTotal = parseFloat(parseFloat(hideHexMiners ? 0 : stakesUsdValue) + parseFloat(addressBalances ?? 0) + parseFloat(addressFarms ?? 0) + parseFloat(addressLps ?? 0) ).toFixed(2)
+    const tokenUsdValue = (address) => {
+        const key = address.toLowerCase()
+        const amount = Number(addressData?.[key]?.normalized ?? addressData?.[address]?.normalized ?? 0)
+        const priceUsd = Number(prices?.[key]?.priceUsd ?? prices?.[address]?.priceUsd ?? 0)
+
+        return amount * priceUsd
+    }
+
+    const walletChange = useMemo(() => {
+        const { dailyCandles, hourlyCandles } = historyData || {}
+
+        if (!addressData || !prices) {
+            return { percent: 0, usd: 0 }
+        }
+
+        let currentTotal = 0
+        let previousTotal = 0
+
+        Object.keys(addressData).forEach(address => {
+            const token = addressData[address]
+            const normalized = Number(token?.normalized ?? 0)
+            if (!normalized || normalized <= 0) return
+
+            const priceInfo = prices[address.toLowerCase()]
+            const priceUsd = Number(priceInfo?.priceUsd ?? 0)
+            const pairId = priceInfo?.pairId
+
+            if (!priceUsd || !pairId) return
+
+            const currentUsd = normalized * priceUsd
+
+            const candles = dailyCandles?.[pairId]
+            const hourly = hourlyCandles?.[pairId]
+
+            let historicalPrice = 0
+
+            if (selectedTimeframe === '1H') {
+                historicalPrice = hourly?.length ? getHourlyCandleCloseNearHoursAgo(hourly, 1) : 0
+            } else if (selectedTimeframe === '6H') {
+                historicalPrice = hourly?.length ? getHourlyCandleCloseNearHoursAgo(hourly, 6) : 0
+            } else if (selectedTimeframe === '24H') {
+                historicalPrice = candles?.length ? getDailyCandleCloseNearDaysAgo(candles, 1) : 0
+            } else if (selectedTimeframe === '7D') {
+                historicalPrice = candles?.length ? getDailyCandleCloseNearDaysAgo(candles, 7) : 0
+            } else if (selectedTimeframe === '30D') {
+                historicalPrice = candles?.length ? getDailyCandleCloseNearDaysAgo(candles, 30) : 0
+            }
+
+            let previousUsd = currentUsd
+
+            if (historicalPrice && historicalPrice > 0) {
+                const ratio = historicalPrice / priceUsd
+                previousUsd = currentUsd * ratio
+            }
+
+            currentTotal += currentUsd
+            previousTotal += previousUsd
+        })
+
+        // include HEX stakes
+        if (!hideHexMiners && stakesUsdValue > 0) {
+            currentTotal += stakesUsdValue
+            previousTotal += stakesUsdValue // (no history yet for stakes)
+        }
+
+        if (!previousTotal || previousTotal <= 0) {
+            return { percent: 0, usd: 0 }
+        }
+
+        const usdChange = currentTotal - previousTotal
+        const percent = (usdChange / previousTotal) * 100
+
+        return {
+            percent,
+            usd: usdChange
+        }
+    }, [
+        addressData,
+        prices,
+        historyData,
+        selectedTimeframe,
+        hideHexMiners,
+        stakesUsdValue
+    ])
     const loading = balanceData?.loading || farmData?.loading || lpData?.loading
     const loadingStatuses = {
         Balances: balanceData?.loading,
@@ -214,7 +351,7 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
 
                     const mapped = rows.reduce((acc, coin) => {
                     const symbol = coin?.symbol
-                    if (!['PLS', 'WPLS', 'PLSX', 'INC', 'HEX'].includes(symbol)) return acc
+                    if (!['PLS', 'WPLS', 'PLSX', 'INC', 'HEX', 'PRVX'].includes(symbol)) return acc
 
                     if (symbol === 'WPLS' && acc.PLS) {
                         return acc
@@ -299,7 +436,42 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
 
     return <Wrapper>
         {pricesLoaded ? <div>
-            <PriceJumbo balance={grandTotal} wallets={data?.wallets} loading={loading} isFiltered={hiddenWallets.length > 0} loadingStatuses={loadingStatuses} bestStable={priceData?.bestStable}/>
+            <div style={{ position: 'relative' }}>
+                <PriceJumbo 
+                    balance={grandTotal} 
+                    wallets={data?.wallets} 
+                    loading={loading} 
+                    isFiltered={hiddenWallets.length > 0} 
+                    loadingStatuses={loadingStatuses} 
+                    bestStable={priceData?.bestStable}
+                />
+
+                {!loading && (
+                    <div style={{
+                        textAlign: 'center',
+                        marginTop: -48,
+                        marginBottom: 28,
+                        position: 'relative',
+                        zIndex: 5,
+                        fontSize: 18,
+                        fontWeight: 700,
+                        color: walletChange.usd > 0
+                            ? 'rgb(130,255,130)'
+                            : walletChange.usd < 0
+                                ? 'rgb(255,130,130)'
+                                : 'rgb(170,170,170)'
+                    }}>
+                        {walletChange.percent >= 0 ? '+' : ''}
+                        {walletChange.percent.toFixed(1)}%
+                        {' '}
+                        (
+                        {walletChange.usd >= 0 ? '+$' : '-$'}
+                        {addCommasToNumber(Math.abs(walletChange.usd).toFixed(2))}
+                        {' '}USD
+                        )
+                    </div>
+                )}
+            </div>
             <div style={{ textAlign: 'right', position: 'relative'}}> 
                 <div style={{ position: 'absolute', left: 0, display: 'inline-block'}}>
                     <Tooltip content={hideZeroValue ? 'Show All Tokens' : 'Hide Tokens Not Held'}>
