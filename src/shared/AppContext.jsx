@@ -252,24 +252,82 @@ export const AppContextProvider = ({ children }) => {
 
     const toggleWatchlist = (watchlistData) => {
         if (!watchlistData?.id) return; // Ensure id is valid
+
         setData(prev => {
             if (prev?.watchlist?.[watchlistData.id]?.id) {
-                const clone = {...prev};
-                delete clone.watchlist[watchlistData.id];
+                const clone = {...prev}
+                delete clone.watchlist[watchlistData.id]
                 saveData(clone)
-                return clone;
+                return clone
             }
-    
-            const prevWatchlist = prev?.watchlist ?? {} 
-            const newData = {...prev, watchlist: {
-                ...prevWatchlist, [watchlistData.id.toLowerCase()]: watchlistData
-            }}
-            saveData(newData)
-            return newData;
-        });
-        setUpdate(prev => prev + 1)
-    };
 
+            const prevWatchlist = prev?.watchlist ?? {}
+            const newData = {
+                ...prev,
+                watchlist: {
+                    ...prevWatchlist,
+                    [watchlistData.id.toLowerCase()]: watchlistData
+                }
+            }
+
+            saveData(newData)
+            return newData
+        })
+
+        setUpdate(prev => prev + 1)
+    }
+
+    const hideToken = (address) => {
+        if (!address) return
+
+        setData(prev => {
+            const newData = {
+                ...prev,
+                hiddenTokens: {
+                    ...(prev?.hiddenTokens || {}),
+                    [address.toLowerCase()]: true
+                }
+            }
+
+            saveData(newData)
+            return newData
+        })
+
+        setUpdate(prev => prev + 1)
+    }
+    
+    const unhideToken = (address) => {
+        if (!address) return
+
+        setData(prev => {
+            const newHiddenTokens = { ...(prev?.hiddenTokens || {}) }
+            delete newHiddenTokens[address.toLowerCase()]
+
+            const newData = {
+                ...prev,
+                hiddenTokens: newHiddenTokens
+            }
+
+            saveData(newData)
+            return newData
+        })
+
+        setUpdate(prev => prev + 1)
+    }
+    
+    const unhideAllTokens = () => {
+        setData(prev => {
+            const newData = {
+                ...prev,
+                hiddenTokens: {}
+            }
+
+            saveData(newData)
+            return newData
+        })
+
+        setUpdate(prev => prev + 1)
+    }
     const massToggleWatchlist = (watchlistDataArray) => {
         if (!Array.isArray(watchlistDataArray) || watchlistDataArray.length === 0) return;
 
@@ -416,6 +474,9 @@ export const AppContextProvider = ({ children }) => {
             error, 
             initialized, 
             toggleWatchlist, 
+            hideToken,
+            unhideToken,
+            unhideAllTokens,
             massToggleWatchlist,
             toggleLPWatchlist,
             massToggleLPWatchlist,

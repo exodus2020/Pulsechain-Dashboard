@@ -6,6 +6,28 @@ Privacy-first portfolio tracker for PulseChain assets with real-time pricing and
 
 ---
 
+## 🚀 v2.1.2 — UX & Watchlist Upgrade
+
+This release improves token management, hidden-token recovery, and bulk watchlist workflows.
+
+### ✨ New Features
+- Added **Add All Results** button for fast bulk token imports
+- Hidden tokens now reappear during **Scan** so they can be restored
+- Added seamless restore flow for previously hidden default tokens
+
+### 🎨 UI/UX
+- Default tokens can now be hidden instead of silently failing to remove
+- Improved Token Watchlist layout with balanced action buttons
+- Hidden tokens are clearly labeled in scan results
+- Cleaner token management workflow
+
+### 🐛 Fixes
+- Fixed issue where default tokens from Ethereum could not be removed
+- Fixed hidden-token recovery and re-add behavior
+- Improved watchlist consistency when adding multiple scan results
+
+---
+
 ## 🚀 v2.1.1 — Performance & Accuracy Patch
 
 This patch focuses on improving performance, fixing calculation edge cases, and polishing the overall user experience.

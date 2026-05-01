@@ -1,3 +1,4 @@
+//index.jsx
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import { defaultSettings } from "../config/settings";

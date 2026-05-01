@@ -125,28 +125,63 @@ function TokensModal({ wplsPrice }) {
   }, [searchTerm])
   
   useEffect(() => {
-    if (Array.isArray(data) && data.length > 0) {
-        // First sort by reserveUSD
-        const sortByBalance = !isNaN(Number(data[0]?.balance))
-        const sorted = data.sort((a, b) => sortByBalance ? Number(b.balance) - Number(a.balance) : Number(b.reserveUSD) - Number(a.reserveUSD))
+    if (!Array.isArray(data)) return
 
-        const filteredResults = []
-        sorted.forEach(m => {
-            const isToken0Wpls = m?.token0?.id === '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
-            const tokenAddress = (isToken0Wpls ? m?.token1?.id : m?.token0?.id)?.toLowerCase()
+    const sortByBalance = !isNaN(Number(data[0]?.balance))
+    const sorted = [...data].sort((a, b) =>
+        sortByBalance
+            ? Number(b.balance) - Number(a.balance)
+            : Number(b.reserveUSD) - Number(a.reserveUSD)
+    )
 
-            if (filteredResults.some(f => {
-                const fIsToken0Wpls = f?.token0?.id === '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
-                const fAddress = (fIsToken0Wpls ? f?.token1?.id : f?.token0?.id)?.toLowerCase()
-                return fAddress === tokenAddress
-            })) return
+    const filteredResults = []
 
-            filteredResults.push({ ...m })
+    sorted.forEach(m => {
+        const isToken0Wpls = m?.token0?.id === '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
+        const tokenAddress = (isToken0Wpls ? m?.token1?.id : m?.token0?.id)?.toLowerCase()
+
+        if (filteredResults.some(f => {
+            const fIsToken0Wpls = f?.token0?.id === '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
+            const fAddress = (fIsToken0Wpls ? f?.token1?.id : f?.token0?.id)?.toLowerCase()
+            return fAddress === tokenAddress
+        })) return
+
+        filteredResults.push({ ...m })
+    })
+
+    // 🔥 ADD HIDDEN TOKENS
+    const hiddenTokens = Object.keys(context?.data?.hiddenTokens || {})
+
+    hiddenTokens.forEach(address => {
+        const info = context.getTokenInfo(address)
+
+        if (!info) return
+
+        // prevent duplicates
+        if (filteredResults.some(r => {
+            const isToken0Wpls = r?.token0?.id === '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
+            const rAddress = (isToken0Wpls ? r?.token1?.id : r?.token0?.id)?.toLowerCase()
+            return rAddress === address.toLowerCase()
+        })) return
+
+        filteredResults.push({
+            id: address,
+            token0: { id: '0xa1077a294dde1b09bb078844df40758a5d0f9a27' },
+            token1: {
+                id: address,
+                name: info?.name || 'Hidden Token',
+                symbol: info?.symbol || '???',
+                derivedUSD: 0
+            },
+            reserveUSD: 0,
+            version: 'hidden',
+            isHidden: true
         })
+    })
 
-        setResults(filteredResults)
-    }
-  }, [data])
+    setResults(filteredResults)
+
+}, [data, context?.data?.hiddenTokens])
 
   const handleSubmit = async(inputValue) => {
     if(isLoading) return
@@ -325,7 +360,13 @@ function TokensModal({ wplsPrice }) {
   }, [allowOneTimeScan, showScanPrompt])
 
   const handleToggleTokens = () => {
-    context.massToggleWatchlist(selectedTokens)
+    selectedTokens.forEach(token => {
+      if (token.isHidden) {
+          context.unhideToken(token.token?.address || token.id)
+      }
+  })
+
+  context.massToggleWatchlist(selectedTokens.filter(t => !t.isHidden))
 
     setModal(false)
   }
@@ -393,9 +434,51 @@ function TokensModal({ wplsPrice }) {
               </Button>
             </div>
             <div style={{ textAlign: 'center', fontSize: 12 }}>
-              {results.length > 0 ? <Button onClick={handleToggleTokens} textAlign='center' style={{ width: 200, margin: 'auto' }}>
-                Add Selected Tokens
-              </Button> : 'Note: Tokens must have at sufficient liquidity in WPLS'}
+              {results.length > 0 ? (
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 10, width: 360, margin: 'auto' }}>
+                  <Button
+                    onClick={handleToggleTokens}
+                    textAlign='center'
+                    style={{ flex: 1 }}
+                  >
+                    Add Selected
+                  </Button>
+
+                  <Button
+                    onClick={() => {
+                      const allTokens = results.map(result => {
+                        const isToken0Wpls = result?.token0?.id === '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
+                        const address = isToken0Wpls ? result?.token1?.id : result?.token0?.id
+                        const name = isToken0Wpls ? result?.token1?.name : result?.token0?.name
+                        const symbol = isToken0Wpls ? result?.token1?.symbol : result?.token0?.symbol
+
+                        return {
+                          ...result,
+                          token: {
+                            address,
+                            name,
+                            symbol
+                          }
+                        }
+                      }).filter(token => token?.token?.address)
+
+                      allTokens.forEach(token => {
+                        if (token.isHidden) {
+                          context.unhideToken(token.token.address || token.id)
+                        }
+                      })
+
+                      context.massToggleWatchlist(allTokens.filter(t => !t.isHidden))
+
+                      setModal(false)
+                    }}
+                    textAlign='center'
+                    style={{ width: 170 }}
+                  >
+                    Add All Results
+                  </Button>
+                </div>
+              ) : 'Note: Tokens must have at sufficient liquidity in WPLS'}
             </div>
             <div>
               <div style={{ textAlign: 'center'}}>

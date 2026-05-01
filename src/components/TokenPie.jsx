@@ -1,6 +1,6 @@
 // TokenPie.jsx
 import { memo, useMemo, useState, useEffect, useRef } from 'react';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Sector, Legend } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, Sector, Legend } from 'recharts';
 import styled from 'styled-components';
 import { fUnit } from '../lib/numbers';
 import { shortenString } from '../lib/string';
@@ -206,9 +206,8 @@ const TokenPieChart = memo(function TokenPieChart({ balances, aliases = {} }) {
     </h3>
 
     {chartData.length > 0 && (
-      <div style={{ width: '100%', height: 250 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
+        <div style={{ width: '100%', height: 250 }}>
+          <PieChart width={window.innerWidth <= 650 ? Math.max(300, window.innerWidth - 100) : 560} height={250}>
             <Pie
               data={chartData}
               cx="50%"
@@ -242,8 +241,7 @@ const TokenPieChart = memo(function TokenPieChart({ balances, aliases = {} }) {
 
             <Tooltip content={<CustomTooltipContent />} />
           </PieChart>
-        </ResponsiveContainer>
-      </div>
+        </div>
     )}
   </ChartContainer>
 );

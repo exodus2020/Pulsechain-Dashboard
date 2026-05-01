@@ -6,6 +6,7 @@ import { useAtom } from "jotai";
 import { tokenModalAtom } from "../../store";
 import LoadingWave from "../LoadingWave";
 import { addCommasToNumber, formatNumber, fUnit, fUnitSub } from "../../lib/numbers";
+import { useAppContext } from "../../shared/AppContext";
 
 const background = 'linear-gradient(to bottom, rgba(50, 50, 50, 0.3), rgba(50, 50, 50, 0.1))'
 
@@ -13,7 +14,13 @@ export default memo(SingleTokenButton)
 function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, watchlistData, token = undefined, tokenAddress = undefined }) {
     const [ singleTokenModal, setSingleTokenModal ] = useAtom(tokenModalAtom)
     const tokenAddresses = token ? [token] :priceArray.filter(f => prices[f]?.pairId === pairId);
+    const context = useAppContext()
 
+    const addressKey = tokenAddress?.toLowerCase()
+
+    if (addressKey && context?.data?.hiddenTokens?.[addressKey]) {
+        return null
+    }
     if (tokenAddresses.length === 0 && watchlistData?.id) {
         const isToken0Wpls = watchlistData?.token0?.id == '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
         const tokenToUse = isToken0Wpls ? watchlistData?.token1 : watchlistData?.token0

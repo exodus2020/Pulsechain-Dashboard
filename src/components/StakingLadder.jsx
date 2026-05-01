@@ -1,5 +1,6 @@
+// StakingLadder.jsx
 import { memo, useMemo, useState, useEffect } from 'react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts'
 import styled from 'styled-components'
 
 const ChartContainer = styled.div`
@@ -95,7 +96,6 @@ function StakingLadderChart({ stakes }) {
         
         // Create 30-day buckets
         const dayRange = maxDays - minDays
-        console.log(dayRange)
         // const bucketSize = dayRange > 2500 ? 90 : dayRange > 2000 ? 60 : 30
         const bucketSize = 30
         const minBucket = Math.floor(minDays / bucketSize)
@@ -172,7 +172,6 @@ function StakingLadderChart({ stakes }) {
             if (bucketCount <= 40) return 3       // Show every fourth bucket
             return Math.ceil(bucketCount / 6)    // Show ~10 ticks max
         } else {
-            console.log(bucketCount)
             // Desktop: use original logic
             if (bucketCount <= 10) return 0        // Show every bucket for small datasets
             if (bucketCount <= 20) return 4        // Show every other bucket
@@ -202,8 +201,12 @@ function StakingLadderChart({ stakes }) {
     return (
         <ChartContainer>
             <h3 style={{ margin: '0 0 20px 0', textAlign: 'center' }}>Staking Ladder</h3>
-            <ResponsiveContainer width="100%" height="90%">
-                <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 30 }}>
+                        <BarChart
+                            width={windowWidth <= 650 ? Math.max(300, windowWidth - 100) : 560}
+                            height={200}
+                            data={chartData}
+                            margin={{ top: 20, right: 30, left: 20, bottom: 30 }}
+                        >
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.1)" />
                     <XAxis 
                         dataKey="daysRemaining" 
@@ -231,7 +234,6 @@ function StakingLadderChart({ stakes }) {
                         strokeWidth={1}
                     />
                 </BarChart>
-            </ResponsiveContainer>
         </ChartContainer>
     )
 }

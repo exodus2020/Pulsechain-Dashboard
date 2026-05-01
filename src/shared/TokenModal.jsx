@@ -305,11 +305,17 @@ function TokenModal({ balanceData, historyData, bestStable }) {
                 <Button
                   style={{ width: 180, textAlign: 'center', display: 'inline-block'}}
                   onClick={() => {
-                    context?.toggleWatchlist(watchlistData || m)
+                    if (isDefaultToken) {
+                      // Hide default token instead of toggling watchlist
+                      context?.hideToken?.(address)
+                    } else {
+                      context?.toggleWatchlist(watchlistData || m)
+                    }
+
                     setModal(null)
                   }}
                 >
-                  Remove from List
+                  {isDefaultToken ? 'Hide Token' : 'Remove from List'}
                 </Button>
               </div>
             </div>

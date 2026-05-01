@@ -1,6 +1,6 @@
 {
   "name": "pulsechain-dashboard",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "main": "./src/main.js",
   "author": "",
   "license": "ISC",
@@ -55,13 +55,23 @@
       "src/preload.js",
       "package.json"
     ],
+    "portable": {
+      "artifactName": "${productName} ${version} Portable.${ext}"
+    },
 
     "win": {
-    "target": [
-      "nsis",
-      "portable"
-    ],
-    "icon": "logo.ico"
-  }
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "${productName} Setup ${version}.${ext}",
+      "icon": "logo.ico"
+    }
   }
 }

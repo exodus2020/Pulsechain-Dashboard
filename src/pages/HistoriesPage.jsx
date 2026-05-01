@@ -28,7 +28,7 @@ const Wrapper = styled.div`
 `
 
 export default function HistoriesPage({ historyData }) {
-    const { history, getHistory, fetchMore, isLoading, progress } = historyData
+    const { history, getChartHistory, fetchMore, isLoading, progress } = historyData
     const [ settings ] = useAtom(appSettingsAtom)
 
     const [ chartData, setChartData ] = useState([])
@@ -47,9 +47,9 @@ export default function HistoriesPage({ historyData }) {
 
     useEffect(() => {
         if (!history?.[tokenToUse]) {
-            getHistory(tokenToUse, true, settings)
+            getChartHistory(tokenToUse, true, settings)
         }
-    }, [history?.[tokenToUse], tokenToUse, getHistory, settings])
+    }, [history?.[tokenToUse], tokenToUse, getChartHistory, settings])
     
 
     return (

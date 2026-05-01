@@ -339,13 +339,6 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
                     Array.isArray(payload) ? payload :
                     []
 
-                console.log("PULSE METRICS NORMALIZED:", rows)
-
-                console.log(
-                    "PULSE METRICS SYMBOLS:",
-                    rows.map(r => r.symbol)
-                    )
-
                 if (Array.isArray(rows) && rows.length > 0) {
                     setPulseMetrics(rows)
 
@@ -379,7 +372,9 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
                         console.warn('Failed to cache pulse metrics', err)
                     }
                 } else {
-                    console.warn('Pulse metrics fetch returned empty rows, keeping cached values')
+                    // PulseCoinList occasionally returns empty rows.
+                    // Keep cached values silently so the console stays clean.
+                    setPulseMetrics(prev => Array.isArray(prev) ? prev : [])
                 }
             } catch (err) {
                 console.error("PulseCoinList fetch failed", err)

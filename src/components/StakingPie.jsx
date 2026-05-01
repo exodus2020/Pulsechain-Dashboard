@@ -1,5 +1,6 @@
+// StakingPie.jsx
 import { memo, useMemo, useState, useEffect, useRef } from 'react'
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend, Sector } from 'recharts'
+import { PieChart, Pie, Cell, Tooltip, Legend, Sector } from 'recharts'
 import styled from 'styled-components'
 import { fUnit } from '../lib/numbers'
 import { shortenString } from '../lib/string'
@@ -430,8 +431,8 @@ function StakingPieChart({ stakes, showBy = 'Shares', hexUsd = 0, handleShowByTo
                     </Button>
                 </div>
             </h3>
-            <ResponsiveContainer width="100%" height="90%" style={{ marginTop: -20 }}>
-                <PieChart>
+            <div style={{ width: '100%', height: 220, marginTop: -20 }}>
+                <PieChart width={windowWidth <= 650 ? Math.max(300, windowWidth - 100) : 560} height={220}>
                     <Pie
                         data={chartData}
                         cx="50%"
@@ -469,7 +470,7 @@ function StakingPieChart({ stakes, showBy = 'Shares', hexUsd = 0, handleShowByTo
                         }}
                     />
                 </PieChart>
-            </ResponsiveContainer>
+            </div>
         </ChartContainer>
     )
 }
