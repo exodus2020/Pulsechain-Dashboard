@@ -1,9 +1,9 @@
+// SingleLPButton.jsx
 import React, { memo } from "react";
 import Button from "../Button";
 import ImageContainer from "../ImageContainer";
 import { useAtom } from "jotai";
 import { liquidityPoolModalAtom, tokenModalAtom } from "../../store";
-import LoadingWave from "../LoadingWave";
 import { addCommasToNumber, fUnit } from "../../lib/numbers";
 import { shortenString } from "../../lib/string";
 import styled from "styled-components";

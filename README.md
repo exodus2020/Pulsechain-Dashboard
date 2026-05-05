@@ -6,6 +6,30 @@ Privacy-first portfolio tracker for PulseChain assets with real-time pricing and
 
 ---
 
+## 🚀 v2.1.3 — Price Accuracy & Metrics Sync
+
+This update focuses on improving price accuracy, percent tracking, and overall calculation reliability.
+
+### 🔧 Improvements
+- Synced % change calculations with **PulseCoinList** for consistent market data
+- Improved reliability of **1H / 6H / 24H / 7D / 30D** calculations across all tokens
+- Better handling of USD vs WPLS conversions using stable pair logic
+- Enhanced fallback logic for missing or inconsistent historical data
+
+### 📊 Accuracy Fixes
+- Fixed issue where % changes were stuck at **0.0%**
+- Fixed incorrect **24H calculations** drifting from real market values
+- Fixed mismatch between dashboard values and external data sources
+- Improved handling of candle-based vs API-based price anchoring
+
+### 🧠 Under the Hood
+- Integrated PulseCoinList metrics as a **reliable override layer**
+- Added caching for last known good % values to prevent flickering/resetting
+- Improved denominator stability to prevent calculation collapse
+- Cleaned up debug logging and reduced console noise
+
+---
+
 ## 🚀 v2.1.2 — UX & Watchlist Upgrade
 
 This release improves token management, hidden-token recovery, and bulk watchlist workflows.

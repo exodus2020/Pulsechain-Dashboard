@@ -1,4 +1,4 @@
-/// DappModal.jsx
+// DappModal.jsx
 import { useAtom } from 'jotai'
 import { useState, useEffect, useMemo } from 'react'
 import styled from 'styled-components'
@@ -11,9 +11,7 @@ import Icon from '../components/Icon'
 import Tooltip from './Tooltip'
 import { getTagColor, repositories } from '../config/dapps'
 import { Selector } from '../components/Selector'
-import defaultMarket from "../config/market.json"
 import Input from "../components/Input"
-import { formatDatetime } from '../lib/date'
 import CommunityDappItem from '../components/CommunityDappItem'
 
 const ModalWrapper = styled.div`

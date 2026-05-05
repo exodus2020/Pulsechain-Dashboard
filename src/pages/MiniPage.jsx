@@ -1,3 +1,4 @@
+// MiniPage.jsx
 import styled from 'styled-components'
 import ImageContainer from '../components/ImageContainer'
 import ImgPls from '../icons/pls.png'

@@ -24,8 +24,6 @@ function createWindow() {
     const primaryDisplay = screen.getPrimaryDisplay()
     const { width, height } = primaryDisplay.workAreaSize
 
-    console.log('MAIN __dirname:', __dirname)
-    console.log('PRELOAD PATH:', require('path').resolve(__dirname, 'preload.js'))
     mainWindow = new BrowserWindow({
         ...defaultConfig,
         height,
@@ -202,14 +200,6 @@ ipcMain.handle('getFile', async (event, url) => {
 
     const contentType = response.headers.get('content-type') || ''
     const text = await response.text()
-
-    console.log('getFile DEBUG', {
-      url,
-      status: response.status,
-      ok: response.ok,
-      contentType,
-      preview: text.slice(0, 300)
-    })
 
     if (!response.ok) {
       throw new Error(`Network response was not ok: ${response.status}`)

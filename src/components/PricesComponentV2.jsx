@@ -1,7 +1,6 @@
 // PricesComponentV2.jsx
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import styled from "styled-components"
-
 import ImageContainer from "./ImageContainer"
 import ImgPLS from '../icons/pls.png'
 import ImgPLSX from '../icons/plsx.png'
@@ -793,6 +792,7 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
         hourlyCandleData?.length
             ? getHourlyCandleCloseNearHoursAgo(hourlyCandleData, 6)
             : 0
+            
     const rawOneHourPriceWpls =
         rawOneHourPrice > 0 && priceComparison?.plsLastHourPrice > 0
             ? rawOneHourPrice / priceComparison.plsLastHourPrice
@@ -821,6 +821,13 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
                 usdSelected,
                 usdSelected ? (isUsdPair ? 1 : priceModifier('plsLastHourPrice')) : 1
             )
+
+    const hasDistinctSixHourPrice =
+        Number.isFinite(rawSixHourPrice) &&
+        rawSixHourPrice > 0 &&
+        Number.isFinite(rawOneDayPrice) &&
+        rawOneDayPrice > 0 &&
+        Math.abs(rawSixHourPrice - rawOneDayPrice) > 1e-12
 
     const lastSixHourPrice = isPlsWplsMode
         ? 1
@@ -952,7 +959,7 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
     const displayPrice = priceToUse > 999_999 ? fUnit(priceToUse, 2) : formatNumber(priceToUse ?? 0, true, false)
 
     const overridePercentValue =
-        selectedCurrency === 'USD' && !isX && name !== 'PRVX'
+        selectedCurrency === 'USD' && !isX
             ? percentOverrides?.[selected]
             : undefined
 
@@ -970,7 +977,7 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
 
     const rawChangeDenominator =
         hasOverridePercent
-            ? lastPrice / (1 + overridePercentRaw)
+            ? lastPrice / (1 + (overridePercentRaw / 100))
             : (
                 selected === '1H' ? lastHourPrice :
                 selected === '6H' ? lastSixHourPrice :
@@ -1072,7 +1079,7 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
 
     // removed ROW OVERRIDE DEBUG log
 
-    const rawDisplayPercentValue = hasOverridePercent ? (overridePercentRaw * 100) : percentChange
+    const rawDisplayPercentValue = hasOverridePercent ? overridePercentRaw : percentChange
 
     const displayPercentValue = rawDisplayPercentValue
 

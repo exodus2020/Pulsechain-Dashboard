@@ -1,4 +1,5 @@
-import { memo } from "react";
+// PriceJumbo.jsx
+import { memo, useEffect, useState } from "react";
 import styled from "styled-components"
 import { addCommasToNumber } from "../../lib/numbers";
 import LoadingWave from "../LoadingWave";
@@ -45,13 +46,125 @@ const Wrapper = styled.div`
             color: white;
         }
     }
-`
+    @keyframes digitReelUp {
+        from { transform: translateY(0); }
+        to { transform: translateY(calc(-100% + 1em)); }
+    }
+
+    @keyframes digitReelDown {
+        from { transform: translateY(calc(-100% + 1em)); }
+        to { transform: translateY(0); }
+    }
+    `
+
+const RollingBalance = ({ value }) => {
+    const formattedValue = addCommasToNumber(Number(value ?? 0).toFixed(2))
+    const [previousValue, setPreviousValue] = useState(formattedValue)
+    const [currentValue, setCurrentValue] = useState(formattedValue)
+    const [rollingKey, setRollingKey] = useState(0)
+
+    useEffect(() => {
+        if (formattedValue === currentValue) return
+
+        setPreviousValue(currentValue)
+        setCurrentValue(formattedValue)
+        setRollingKey(prev => prev + 1)
+    }, [formattedValue, currentValue])
+
+    const getDigitPath = (from, to) => {
+        const start = Number(from)
+        const end = Number(to)
+
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return [to]
+        if (start === end) return [to]
+
+        const direction = end > start ? 1 : -1
+        const path = []
+
+        for (let n = start; direction > 0 ? n <= end : n >= end; n += direction) {
+            path.push(String(n))
+        }
+
+        return path
+    }
+
+    const maxLength = Math.max(previousValue.length, currentValue.length)
+    const oldText = previousValue.padStart(maxLength, ' ')
+    const newText = currentValue.padStart(maxLength, ' ')
+
+    return (
+        <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            lineHeight: 1,
+            letterSpacing: '0em'
+        }}>
+            {newText.split('').map((char, index) => {
+                const oldChar = oldText[index]
+                const isDigit = /\d/.test(char)
+                const oldIsDigit = /\d/.test(oldChar)
+                const changed = isDigit && oldIsDigit && oldChar !== char
+
+                const baseStyle = {
+                    width: isDigit ? '0.6em' : '0.35em',
+                    height: '1em',
+                    lineHeight: '1em',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    textAlign: 'center',
+                    position: 'relative',
+                    overflow: changed ? 'hidden' : 'visible'
+                }
+
+                if (!isDigit || !changed) {
+                    return (
+                        <span key={index} style={baseStyle}>
+                            {char}
+                        </span>
+                    )
+                }
+
+                const path = getDigitPath(oldChar, char)
+                const goingUp = Number(char) > Number(oldChar)
+
+                return (
+                    <span key={`${rollingKey}-${index}`} style={baseStyle}>
+                        <span
+                            style={{
+                                position: 'absolute',
+                                left: 0,
+                                top: 0,
+                                width: '100%',
+                                animation: `digitReel${goingUp ? 'Up' : 'Down'} 850ms cubic-bezier(0.22, 1, 0.36, 1) forwards`
+                            }}
+                        >
+                            {path.map((digit, i) => (
+                                <span
+                                    key={`${digit}-${i}`}
+                                    style={{
+                                        height: '1em',
+                                        lineHeight: '1em',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
+                                    }}
+                                >
+                                    {digit}
+                                </span>
+                            ))}
+                        </span>
+                    </span>
+                )
+            })}
+        </span>
+    )
+}
 
 export default memo(PriceJumbo)
 function PriceJumbo ({ balance = 0, wallets = {}, loading = false, isFiltered = false, loadingStatuses = {}, bestStable = null }) {
     const [ walletModal, setWalletModal ] = useAtom(walletsModalAtom)
     
-    const displayBalance = addCommasToNumber(balance)
     const balancesLoading = loading
 
     const noAddresses = Object.keys(wallets).length === 0
@@ -107,7 +220,7 @@ function PriceJumbo ({ balance = 0, wallets = {}, loading = false, isFiltered = 
                 $ 
             </span>
             <span className="jumbo-price">
-                {displayBalance}<br/>
+                <RollingBalance value={balance} /><br/>
             </span>
         </div>
         {balancesLoading ? <div className="jumbo-loader">

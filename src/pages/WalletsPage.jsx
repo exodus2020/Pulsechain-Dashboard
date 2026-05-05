@@ -2,7 +2,6 @@
 import styled from "styled-components"
 import Button from "../components/Button"
 import { defaultTokenInformation, liquidityPairs } from "../lib/tokens"
-import { formatDatetime } from "../lib/date"
 import { hiddenWalletsAtom, hideHexMinersAtom, hideZeroValueAtom, liquiditySearchModalAtom, tokensModalAtom, walletsModalAtom, timeframeAtom } from "../store"
 import { useAtom } from "jotai"
 import { useAppContext } from "../shared/AppContext"
@@ -17,10 +16,8 @@ import SingleFarmButton from "../components/PricePage/SingleFarmButton"
 import { useWallets } from "../hooks/useWallets"
 import { icons_list } from "../config/icons"
 import Icon from "../components/Icon"
-import PricesComponent from "../components/PricesComponent"
 import { StakeComponent } from "../components/PricePage/StakeComponent"
 import { parseHexStats } from "../lib/hex"
-import { LoadingBar } from "../components/LoadingBar"
 import useFilterBalance from "../hooks/useFilterBalance"
 import PricesComponentV2 from "../components/PricesComponentV2"
 import HexComponent from "../components/HexComponent"
@@ -84,24 +81,17 @@ const Wrapper = styled.div`
 function getDailyCandleCloseNearDaysAgo(candles, daysAgo) {
     if (!Array.isArray(candles) || candles.length === 0) return 0
 
-    const latestTimestamp = Number(candles[candles.length - 1]?.timestamp)
-    if (!Number.isFinite(latestTimestamp) || latestTimestamp <= 0) return 0
+    const targetTime = Date.now() - (daysAgo * 24 * 60 * 60 * 1000)
 
-    const targetTime = latestTimestamp - (daysAgo * 24 * 60 * 60 * 1000)
+    const valid = candles.filter(c => Number(c.timestamp) <= targetTime)
 
-    let closest = null
-    let smallestDiff = Infinity
+    if (valid.length === 0) return 0
 
-    for (const item of candles) {
-        const ts = Number(item?.timestamp)
-        if (!Number.isFinite(ts) || ts <= 0) continue
-
-        const diff = Math.abs(ts - targetTime)
-        if (diff < smallestDiff) {
-            smallestDiff = diff
-            closest = item
-        }
-    }
+    const closest = valid.reduce((prev, curr) => {
+        return (targetTime - curr.timestamp) < (targetTime - prev.timestamp)
+            ? curr
+            : prev
+    })
 
     const close = Number(closest?.close)
     return Number.isFinite(close) && close > 0 ? close : 0
@@ -110,24 +100,19 @@ function getDailyCandleCloseNearDaysAgo(candles, daysAgo) {
 function getHourlyCandleCloseNearHoursAgo(candles, hoursAgo) {
     if (!Array.isArray(candles) || candles.length === 0) return 0
 
-    const latestTimestamp = Number(candles[candles.length - 1]?.timestamp)
-    if (!Number.isFinite(latestTimestamp) || latestTimestamp <= 0) return 0
+    const targetTime = Date.now() - (hoursAgo * 60 * 60 * 1000)
 
-    const targetTime = latestTimestamp - (hoursAgo * 60 * 60 * 1000)
+    // ONLY allow candles BEFORE target time
+    const valid = candles.filter(c => Number(c.timestamp) <= targetTime)
 
-    let closest = null
-    let smallestDiff = Infinity
+    if (valid.length === 0) return 0
 
-    for (const item of candles) {
-        const ts = Number(item?.timestamp)
-        if (!Number.isFinite(ts) || ts <= 0) continue
-
-        const diff = Math.abs(ts - targetTime)
-        if (diff < smallestDiff) {
-            smallestDiff = diff
-            closest = item
-        }
-    }
+    // take closest BEFORE (not absolute closest)
+    const closest = valid.reduce((prev, curr) => {
+        return (targetTime - curr.timestamp) < (targetTime - prev.timestamp)
+            ? curr
+            : prev
+    })
 
     const close = Number(closest?.close)
     return Number.isFinite(close) && close > 0 ? close : 0
@@ -229,6 +214,7 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
     const incPriceUsd = Number(prices?.['0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d']?.priceUsd ?? 0)
 
     const grandTotal = parseFloat(parseFloat(hideHexMiners ? 0 : stakesUsdValue) + parseFloat(addressBalances ?? 0) + parseFloat(addressFarms ?? 0) + parseFloat(addressLps ?? 0) ).toFixed(2)
+
     const tokenUsdValue = (address) => {
         const key = address.toLowerCase()
         const amount = Number(addressData?.[key]?.normalized ?? addressData?.[address]?.normalized ?? 0)
@@ -240,59 +226,186 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
     const walletChange = useMemo(() => {
         const { dailyCandles, hourlyCandles } = historyData || {}
 
-        if (!addressData || !prices) {
+        if (!prices) {
             return { percent: 0, usd: 0 }
+        }
+
+        const getHistoricalPrice = (pairId, currentPriceUsd) => {
+            if (!pairId || !currentPriceUsd || currentPriceUsd <= 0) return 0
+
+            const candles = dailyCandles?.[pairId]
+            const hourly = hourlyCandles?.[pairId]
+
+            if (selectedTimeframe === '1H') {
+                return hourly?.length ? getHourlyCandleCloseNearHoursAgo(hourly, 1) : 0
+            }
+
+            if (selectedTimeframe === '6H') {
+                return hourly?.length ? getHourlyCandleCloseNearHoursAgo(hourly, 6) : 0
+            }
+
+            if (selectedTimeframe === '24H') {
+                return hourly?.length
+                    ? getHourlyCandleCloseNearHoursAgo(hourly, 24)
+                    : candles?.length
+                        ? getDailyCandleCloseNearDaysAgo(candles, 1)
+                        : 0
+            }
+
+            if (selectedTimeframe === '7D') {
+                return candles?.length ? getDailyCandleCloseNearDaysAgo(candles, 7) : 0
+            }
+
+            if (selectedTimeframe === '30D') {
+                return candles?.length ? getDailyCandleCloseNearDaysAgo(candles, 30) : 0
+            }
+
+            return 0
+        }
+
+        const getPulsePercentForAddress = (address) => {
+            const key = address?.toLowerCase?.()
+
+            const symbolByAddress = {
+                '0xa1077a294dde1b09bb078844df40758a5d0f9a27': 'PLS',
+                '0x95b303987a60c71504d99aa1b13b4da07b0790ab': 'PLSX',
+                '0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d': 'INC',
+                '0x2b591e99afe9f32eaa6214f7b7629768c40eeb39': 'HEX',
+                '0xf6f8db0aba00007681f8faf16a0fda1c9b030b11': 'PRVX'
+            }
+
+            const symbol = symbolByAddress[key]
+            if (!symbol) return null
+
+            const value = Number(cachedPulseOverrides?.[symbol]?.[selectedTimeframe])
+
+            return Number.isFinite(value) ? value : null
+        }
+
+        const getPreviousUsdFromCurrent = (currentUsd, currentPriceUsd, pairId, tokenAddress) => {
+            if (!currentUsd || currentUsd <= 0) return 0
+
+            const pulsePercent = getPulsePercentForAddress(tokenAddress)
+
+            if (pulsePercent !== null) {
+                return currentUsd / (1 + (pulsePercent / 100))
+            }
+
+            const historicalPrice = getHistoricalPrice(pairId, currentPriceUsd)
+
+            if (!historicalPrice || historicalPrice <= 0 || !currentPriceUsd || currentPriceUsd <= 0) {
+                return currentUsd
+            }
+
+            return currentUsd * (historicalPrice / currentPriceUsd)
         }
 
         let currentTotal = 0
         let previousTotal = 0
 
-        Object.keys(addressData).forEach(address => {
+        Object.keys(addressData ?? {}).forEach(address => {
             const token = addressData[address]
             const normalized = Number(token?.normalized ?? 0)
             if (!normalized || normalized <= 0) return
 
-            const priceInfo = prices[address.toLowerCase()]
+            const key = address.toLowerCase()
+            const priceInfo = prices?.[key]
             const priceUsd = Number(priceInfo?.priceUsd ?? 0)
             const pairId = priceInfo?.pairId
 
-            if (!priceUsd || !pairId) return
+            if (!priceUsd || priceUsd <= 0) return
 
             const currentUsd = normalized * priceUsd
-
-            const candles = dailyCandles?.[pairId]
-            const hourly = hourlyCandles?.[pairId]
-
-            let historicalPrice = 0
-
-            if (selectedTimeframe === '1H') {
-                historicalPrice = hourly?.length ? getHourlyCandleCloseNearHoursAgo(hourly, 1) : 0
-            } else if (selectedTimeframe === '6H') {
-                historicalPrice = hourly?.length ? getHourlyCandleCloseNearHoursAgo(hourly, 6) : 0
-            } else if (selectedTimeframe === '24H') {
-                historicalPrice = candles?.length ? getDailyCandleCloseNearDaysAgo(candles, 1) : 0
-            } else if (selectedTimeframe === '7D') {
-                historicalPrice = candles?.length ? getDailyCandleCloseNearDaysAgo(candles, 7) : 0
-            } else if (selectedTimeframe === '30D') {
-                historicalPrice = candles?.length ? getDailyCandleCloseNearDaysAgo(candles, 30) : 0
-            }
-
-            let previousUsd = currentUsd
-
-            if (historicalPrice && historicalPrice > 0) {
-                const ratio = historicalPrice / priceUsd
-                previousUsd = currentUsd * ratio
-            }
+            const previousUsd = getPreviousUsdFromCurrent(currentUsd, priceUsd, pairId, key)
 
             currentTotal += currentUsd
             previousTotal += previousUsd
         })
 
-        // include HEX stakes
+        // HEX stakes/miners: calculate historical value using HEX historical price
         if (!hideHexMiners && stakesUsdValue > 0) {
+            const hexPriceInfo = prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']
+            const currentHexPrice = Number(hexPriceInfo?.priceUsd ?? 0)
+            const hexPairId = hexPriceInfo?.pairId
+
             currentTotal += stakesUsdValue
-            previousTotal += stakesUsdValue // (no history yet for stakes)
+            previousTotal += getPreviousUsdFromCurrent(
+            stakesUsdValue,
+            currentHexPrice,
+            hexPairId,
+            '0x2b591e99afe9f32eaa6214f7b7629768c40eeb39'
+        )
         }
+
+        // LPs and farms: estimate historical value by repricing token0/token1/rewards
+        // using each asset's historical USD price.
+        // include them in both totals so the percentage denominator matches the big wallet total.
+        // This prevents token-only math from overstating/understating the full-wallet percentage.
+        // LPs (unstaked)
+        const findPoolInfo = (lpAddress) => {
+            const key = lpAddress?.toLowerCase?.()
+            if (!key) return {}
+
+            return (
+                (farmData?.pools ?? []).find(pool => pool?.lpAddress?.toLowerCase?.() === key) ??
+                (lpData?.pools ?? []).find(pool => pool?.lpAddress?.toLowerCase?.() === key) ??
+                liquidityPairs?.[key] ??
+                {}
+            )
+        }
+
+        // LPs
+        Object.entries(lps ?? {}).forEach(([lpAddress, lp]) => {
+            const poolInfo = findPoolInfo(lpAddress)
+
+            const token0Address =
+                poolInfo?.token0Address?.toLowerCase?.() ??
+                poolInfo?.token0?.id?.toLowerCase?.()
+
+            const token1Address =
+                poolInfo?.token1Address?.toLowerCase?.() ??
+                poolInfo?.token1?.id?.toLowerCase?.()
+
+            const token0Usd = Number(lp?.token0?.usd ?? 0)
+            const token1Usd = Number(lp?.token1?.usd ?? 0)
+
+            const priceInfo0 = token0Address ? prices?.[token0Address] : undefined
+            const priceInfo1 = token1Address ? prices?.[token1Address] : undefined
+
+            currentTotal += token0Usd + token1Usd
+            previousTotal +=
+                getPreviousUsdFromCurrent(token0Usd, Number(priceInfo0?.priceUsd ?? 0), priceInfo0?.pairId, token0Address) +
+                getPreviousUsdFromCurrent(token1Usd, Number(priceInfo1?.priceUsd ?? 0), priceInfo1?.pairId, token1Address)
+        })
+
+        // Farms
+        Object.entries(farm ?? {}).forEach(([lpAddress, f]) => {
+            const poolInfo = findPoolInfo(lpAddress)
+
+            const token0Address =
+                poolInfo?.token0Address?.toLowerCase?.() ??
+                poolInfo?.token0?.id?.toLowerCase?.()
+
+            const token1Address =
+                poolInfo?.token1Address?.toLowerCase?.() ??
+                poolInfo?.token1?.id?.toLowerCase?.()
+
+            const token0Usd = Number(f?.token0?.usd ?? 0)
+            const token1Usd = Number(f?.token1?.usd ?? 0)
+            const rewardsUsd = Number(f?.rewards?.usd ?? 0)
+
+            const priceInfo0 = token0Address ? prices?.[token0Address] : undefined
+            const priceInfo1 = token1Address ? prices?.[token1Address] : undefined
+
+            const incInfo = prices?.['0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d']
+
+            currentTotal += token0Usd + token1Usd + rewardsUsd
+
+            previousTotal +=
+                getPreviousUsdFromCurrent(token0Usd, Number(priceInfo0?.priceUsd ?? 0), priceInfo0?.pairId, token0Address) +
+                getPreviousUsdFromCurrent(token1Usd, Number(priceInfo1?.priceUsd ?? 0), priceInfo1?.pairId, token1Address) +
+                getPreviousUsdFromCurrent(rewardsUsd, Number(incInfo?.priceUsd ?? 0), incInfo?.pairId, '0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d')
+        })
 
         if (!previousTotal || previousTotal <= 0) {
             return { percent: 0, usd: 0 }
@@ -311,7 +424,11 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
         historyData,
         selectedTimeframe,
         hideHexMiners,
-        stakesUsdValue
+        stakesUsdValue,
+        lps,
+        farm,
+        farmData?.pools,
+        lpData?.pools
     ])
     const loading = balanceData?.loading || farmData?.loading || lpData?.loading
     const loadingStatuses = {
@@ -334,6 +451,7 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
                         : raw
 
                 const rows =
+                    Array.isArray(payload?.props?.pageProps?.topCoinsMetrics) ? payload.props.pageProps.topCoinsMetrics :
                     Array.isArray(payload?.pageProps?.topCoinsMetrics) ? payload.pageProps.topCoinsMetrics :
                     Array.isArray(payload?.topCoinsMetrics) ? payload.topCoinsMetrics :
                     Array.isArray(payload) ? payload :
@@ -353,11 +471,11 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
                     const normalizedSymbol = symbol === 'WPLS' ? 'PLS' : symbol
 
                     acc[normalizedSymbol] = {
-                        '1H': Number(coin?.percent1h),
-                        '6H': Number(coin?.percent6h),
-                        '24H': Number(coin?.percent24h),
-                        '7D': Number(coin?.percent7d),
-                        '30D': Number(coin?.percent30d)
+                        '1H': Number(coin?.percent1h) * 100,
+                        '6H': Number(coin?.percent6h) * 100,
+                        '24H': Number(coin?.percent24h) * 100,
+                        '7D': Number(coin?.percent7d) * 100,
+                        '30D': Number(coin?.percent30d) * 100
                     }
 
                     return acc
@@ -383,7 +501,7 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
         }
 
         fetchPulseMetrics()
-    }, [])
+    }, [selectedTimeframe])
 
     const incUsdPerDay = incPerDay * incPriceUsd
     const prevIncRef = useRef(
@@ -432,8 +550,9 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
     return <Wrapper>
         {pricesLoaded ? <div>
             <div style={{ position: 'relative' }}>
-                <PriceJumbo 
-                    balance={grandTotal} 
+                <PriceJumbo
+                    key={`jumbo-${hiddenWallets.join('-')}-${hideHexMiners}`}
+                    balance={grandTotal}
                     wallets={data?.wallets} 
                     loading={loading} 
                     isFiltered={hiddenWallets.length > 0} 
@@ -501,7 +620,7 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                     historyData={historyData}
                     priceData={priceData}
                     getImage={getImage}
-                    pulseMetrics={Array.isArray(pulseMetrics) && pulseMetrics.length > 0 ? pulseMetrics : cachedPulseOverrides}
+                    pulseMetrics={cachedPulseOverrides}
                 />
             </div>
             {hasHexStakes ? <div>
