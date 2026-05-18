@@ -16,7 +16,7 @@
     "axios": "^1.7.9",
     "call-bind": "^1.0.8",
     "ethers": "^5.7.2",
-    "express": "^4.18.2",
+    "express": "^5.2.1",
     "isomorphic-git": "^1.29.0",
     "jotai": "^2.11.0",
     "js-sha3": "^0.9.3",

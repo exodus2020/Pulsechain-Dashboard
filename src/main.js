@@ -37,9 +37,27 @@ function createWindow() {
           contextIsolation: true,
           webSecurity: true
         }
-    })
+       })
 
-    if (isDev) {
+      if (!isDev) {
+        mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+          callback({
+            responseHeaders: {
+              ...details.responseHeaders,
+              'Content-Security-Policy': [
+                "default-src 'self'; " +
+                "script-src 'self'; " +
+                "style-src 'self' 'unsafe-inline'; " +
+                "img-src 'self' data: blob: https:; " +
+                "font-src 'self' data:; " +
+                "connect-src 'self' https:;"
+              ]
+            }
+          })
+        })
+      }
+
+      if (isDev) {
         mainWindow.loadURL('http://localhost:5173')
     } else {
         mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))

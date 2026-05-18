@@ -1,13 +1,20 @@
 <!DOCTYPE html>
 <html>
   <head>
-  <meta charset="UTF-8" />
-  <meta
-    http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'unsafe-eval' http://localhost:5173; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' http://localhost:5173 ws://localhost:5173 https:;"
-  />
-  <title>PulseChain Dashboard: Privacy-First DeFi</title>
-</head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        script-src 'self' 'unsafe-eval' blob: http://localhost:5173;
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' data: blob: https:;
+        font-src 'self' data:;
+        connect-src 'self' http://localhost:5173 ws://localhost:5173 https:;
+      "
+    />
+    <title>PulseChain Dashboard: Privacy-First DeFi</title>
+  </head>
   <body>
     <div id="root"></div>
     <div id="tooltip-root"></div>
