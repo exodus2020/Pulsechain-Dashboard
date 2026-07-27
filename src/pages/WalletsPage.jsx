@@ -119,7 +119,15 @@ function getHourlyCandleCloseNearHoursAgo(candles, hoursAgo) {
 }
 
 export default memo(WalletsPage)
-function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, hexData}) {
+function WalletsPage ({
+    priceData,
+    balanceData,
+    farmData,
+    lpData,
+    historyData,
+    hexData,
+    hexDcaData
+}) {
     const { pricePairs, prices, priceLastUpdated } = priceData
     const { balances, combinedBalances } = balanceData
     const { data, getImage } = useAppContext()
@@ -213,7 +221,28 @@ function WalletsPage ({priceData, balanceData, farmData, lpData, historyData, he
     const stakesUsdValue = (stakeStats?.totalFinalHex ?? 0) * hexPrice
     const incPriceUsd = Number(prices?.['0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d']?.priceUsd ?? 0)
 
-    const grandTotal = parseFloat(parseFloat(hideHexMiners ? 0 : stakesUsdValue) + parseFloat(addressBalances ?? 0) + parseFloat(addressFarms ?? 0) + parseFloat(addressLps ?? 0) ).toFixed(2)
+    const walletAddresses = Object.keys(data?.wallets ?? {})
+        .map(address => address.toLowerCase())
+
+    const hiddenWalletAddresses = new Set(
+        (hiddenWallets ?? []).map(address => address.toLowerCase())
+    )
+
+    const allWalletsHidden =
+        walletAddresses.length > 0 &&
+        walletAddresses.every(address =>
+            hiddenWalletAddresses.has(address)
+        )
+
+    const calculatedGrandTotal =
+        parseFloat(hideHexMiners ? 0 : stakesUsdValue) +
+        parseFloat(addressBalances ?? 0) +
+        parseFloat(addressFarms ?? 0) +
+        parseFloat(addressLps ?? 0)
+
+    const grandTotal = allWalletsHidden
+        ? '0.00'
+        : parseFloat(calculatedGrandTotal).toFixed(2)
 
     const tokenUsdValue = (address) => {
         const key = address.toLowerCase()
@@ -560,7 +589,7 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                     bestStable={priceData?.bestStable}
                 />
 
-                {!loading && (
+                {!loading && !allWalletsHidden && (
                     <div style={{
                         textAlign: 'center',
                         marginTop: -48,
@@ -624,7 +653,7 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                 />
             </div>
             {hasHexStakes ? <div>
-                <StakeComponent visibleWallets={visibleWallets} disabled={hideHexMiners} hexData={hexData} hexPrice={prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} hiddenWallets={hiddenWallets}/>
+                <StakeComponent visibleWallets={visibleWallets} disabled={hideHexMiners} hexData={hexData} hexDcaData={hexDcaData} hexPrice={prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} hiddenWallets={hiddenWallets}/>
 
                 {!hideHexMiners && <HexComponent hexData={hexData} visibleWallets={visibleWallets} hexPrice={prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} aliases={data?.aliases ?? {}}/>}
             </div> : ''}

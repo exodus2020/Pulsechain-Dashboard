@@ -1,12 +1,32 @@
 export const defaultSettings = {
     rpcs: {
-        mainnet: ['https://rpc-pulsechain.g4mm4.io'],
-        testnet: ['https://rpc-testnet-pulsechain.g4mm4.io']
+        mainnet: [
+            'https://rpc-pulsechain.g4mm4.io'
+        ],
+
+        ethereum: [
+            'https://ethereum-rpc.publicnode.com',
+        ],
+
+        testnet: [
+            'https://rpc-testnet-pulsechain.g4mm4.io'
+        ]
     },
+
     scan: {
-        mainnet: ['https://api.scan.pulsechain.com/api'],
-        testnet: ['https://api.scan.v4.testnet.pulsechain.com/api']
+        mainnet: [
+            'https://api.scan.pulsechain.com/api'
+        ],
+
+        ethereum: [
+            'https://eth.blockscout.com/api'
+        ],
+
+        testnet: [
+            'https://api.scan.v4.testnet.pulsechain.com/api'
+        ]
     },
+
     config: {
         scanEnabled: false,
         tokenImagesEnabled: false,

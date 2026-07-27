@@ -30,6 +30,9 @@ export const toastAtom = atom({ message: '', show: false, messages: [], nextId: 
 
 export const urlsFetchedAtom = atom(false)
 
-export const hiddenWalletsAtom = atom([])
+export const hiddenWalletsAtom = atomWithStorage(
+    'hidden-wallets',
+    []
+)
 export const hideZeroValueAtom = atomWithStorage('hide-zero-value', false)
 export const hideHexMinersAtom = atomWithStorage('hide-hex-miners', false)

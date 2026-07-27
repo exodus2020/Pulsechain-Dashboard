@@ -203,7 +203,66 @@ ipcMain.handle('checkVersion', async (event, folder) => {
     return null
   }
 })
+ipcMain.handle('fetch-json', async (event, url) => {
+  try {
+    const allowedUrl =
+    typeof url === 'string' &&
+    (
+      url.startsWith('https://api.geckoterminal.com/') ||
+      url.startsWith('https://data-api.binance.vision/')
+    )
 
+  if (!allowedUrl) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'Unsupported URL'
+      }
+    }
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
+          'AppleWebKit/537.36 Chrome/137.0.0.0 Safari/537.36',
+        'Accept': 'application/json'
+      },
+      timeout: 20000
+    })
+
+    const text = await response.text()
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        error: `GeckoTerminal returned ${response.status}`
+      }
+    }
+
+    try {
+      return {
+        ok: true,
+        status: response.status,
+        data: JSON.parse(text)
+      }
+    } catch {
+      return {
+        ok: false,
+        status: 500,
+        error: 'GeckoTerminal returned invalid JSON'
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      error:
+        error?.message ??
+        'Unable to retrieve GeckoTerminal data'
+    }
+  }
+})
 ipcMain.handle('getFile', async (event, url) => {
   try {
     const response = await fetch(url, {

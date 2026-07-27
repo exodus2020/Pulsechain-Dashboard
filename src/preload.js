@@ -1,3 +1,4 @@
+//preload.js
 const { contextBridge, ipcRenderer } = require('electron')
 
 
@@ -14,4 +15,5 @@ contextBridge.exposeInMainWorld('electron', {
   stopServer: (folder) => ipcRenderer.invoke('stop-server', folder),
   toggleMode: (height, width) => ipcRenderer.invoke('toggle-mode', height, width),
   getMode: () => ipcRenderer.invoke('get-mode'),
+  fetchJson: (url) => ipcRenderer.invoke('fetch-json', url),
 })

@@ -1,41 +1,77 @@
+//useWallets.js
 import { useAtom } from 'jotai'
 import { hiddenWalletsAtom } from '../store'
 
-export function useWallets(wallets) {
-    const [hiddenWallets, setHiddenWallets] = useAtom(hiddenWalletsAtom)
+const normalizeAddress = address => {
+    return String(address ?? '').toLowerCase().trim()
+}
 
-    const toggleWalletVisibility = (address) => {
-        setHiddenWallets(prev => {
-            const isHidden = prev.includes(address)
+export function useWallets(wallets) {
+    const [hiddenWallets, setHiddenWallets] =
+        useAtom(hiddenWalletsAtom)
+
+    const normalizedHiddenWallets =
+        hiddenWallets.map(normalizeAddress)
+
+    const toggleWalletVisibility = address => {
+        const normalizedAddress =
+            normalizeAddress(address)
+
+        if (!normalizedAddress) {
+            return
+        }
+
+        setHiddenWallets(previousWallets => {
+            const normalizedPreviousWallets =
+                previousWallets.map(normalizeAddress)
+
+            const isHidden =
+                normalizedPreviousWallets.includes(
+                    normalizedAddress
+                )
+
             if (isHidden) {
-                return prev.filter(a => a !== address)
-            } else {
-                const newHidden = [...prev, address]
-                // If all wallets would be hidden, clear the array instead
-                // if (newHidden.length === Object.keys(wallets).length) {
-                //     return []
-                // }
-                return newHidden
+                return previousWallets.filter(walletAddress => {
+                    return (
+                        normalizeAddress(walletAddress) !==
+                        normalizedAddress
+                    )
+                })
             }
+
+            return [
+                ...previousWallets,
+                normalizedAddress
+            ]
         })
     }
 
-    const visibleWallets = Object.keys(wallets ?? {}).reduce((acc, address) => {
-        // // If all wallets are hidden, show all wallets
-        // if (hiddenWallets.length === Object.keys(wallets).length) {
-        //     acc[address] = wallets[address]
-        // }
-        // // Otherwise, only show non-hidden wallets
-        // else 
-        if (!hiddenWallets.includes(address)) {
-            acc[address] = wallets[address]
-        }
-        return acc
-    }, {})
+    const visibleWallets =
+        Object.keys(wallets ?? {}).reduce(
+            (accumulator, address) => {
+                const normalizedAddress =
+                    normalizeAddress(address)
+
+                if (
+                    !normalizedHiddenWallets.includes(
+                        normalizedAddress
+                    )
+                ) {
+                    accumulator[address] = wallets[address]
+                }
+
+                return accumulator
+            },
+            {}
+        )
 
     return {
         toggleWalletVisibility,
         visibleWallets,
-        isHidden: (address) => hiddenWallets.includes(address)
+        isHidden: address => {
+            return normalizedHiddenWallets.includes(
+                normalizeAddress(address)
+            )
+        }
     }
-} 
+}

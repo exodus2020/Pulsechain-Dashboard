@@ -1,5 +1,11 @@
+//Tooltip.jsx
 import styled from "styled-components"
-import { useState, useEffect, useCallback, useRef } from "react"
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef
+} from "react"
 import { createPortal } from "react-dom"
 
 // Create tooltip root once at module level
@@ -97,49 +103,163 @@ export default function Tooltip({
   dark = true,
   delay = 200,
   customStyle = {},
+  followCursor = false,
+  fitViewport = false,
   ...props 
 }) {
   const [visible, setVisible] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 0 })
+  const [scale, setScale] = useState(1)
+  const tooltipRef = useRef(null)
   const timeoutRef = useRef(null)
   const portalRoot = useRef(getTooltipRoot())
 
-  const updatePosition = useCallback((rect) => {
-    const tooltipOffset = 8
-    let top, left
+const updatePosition = useCallback((rect, event = null) => {
+  const tooltipOffset = 12
 
-    switch (placement) {
-      case 'top':
-        top = rect.top + window.scrollY - tooltipOffset
-        left = rect.left + window.scrollX + (rect.width / 2)
-        break
-      case 'bottom':
-        top = rect.bottom + window.scrollY + tooltipOffset
-        left = rect.left + window.scrollX + (rect.width / 2)
-        break
-      case 'left':
-        top = rect.top + window.scrollY + (rect.height / 2)
-        left = rect.left + window.scrollX - tooltipOffset
-        break
-      case 'right':
-        top = rect.top + window.scrollY + (rect.height / 2)
-        left = rect.right + window.scrollX + tooltipOffset
-        break
-      default:
-        top = rect.bottom + window.scrollY + tooltipOffset
-        left = rect.left + window.scrollX + (rect.width / 2)
+  if (followCursor && event) {
+    const viewportPadding = 12
+    const cursorGap = 14
+
+    const mouseX = event.clientX
+    const mouseY = event.clientY
+
+    const tooltipElement =
+      tooltipRef.current
+
+    if (!tooltipElement) {
+      setPosition({
+        left: mouseX + cursorGap,
+        top: mouseY
+      })
+
+      return
     }
 
-    setPosition({ top, left })
-  }, [placement])
+    const tooltipWidth =
+      tooltipElement.offsetWidth
+
+    const tooltipHeight =
+      tooltipElement.offsetHeight
+
+    const availableHeight =
+      window.innerHeight -
+      viewportPadding * 2
+
+    const nextScale =
+      fitViewport &&
+      tooltipHeight > availableHeight
+        ? availableHeight / tooltipHeight
+        : 1
+
+    const scaledWidth =
+      tooltipWidth * nextScale
+
+    const scaledHeight =
+      tooltipHeight * nextScale
+
+    let left =
+      mouseX + cursorGap
+
+    let top =
+      mouseY - scaledHeight / 2
+
+    // Prefer the right side of the cursor.
+    if (
+      left + scaledWidth >
+      window.innerWidth - viewportPadding
+    ) {
+      left =
+        mouseX -
+        scaledWidth -
+        cursorGap
+    }
+
+    // Keep the entire tooltip inside the viewport.
+    left = Math.max(
+      viewportPadding,
+      Math.min(
+        left,
+        window.innerWidth -
+          scaledWidth -
+          viewportPadding
+      )
+    )
+
+    top = Math.max(
+      viewportPadding,
+      Math.min(
+        top,
+        window.innerHeight -
+          scaledHeight -
+          viewportPadding
+      )
+    )
+
+    setScale(nextScale)
+
+    setPosition({
+      left,
+      top
+    })
+
+    return
+  }
+
+  let top
+  let left
+
+  switch (placement) {
+    case "top":
+      top = rect.top - tooltipOffset
+      left = rect.left + rect.width / 2
+      break
+
+    case "bottom":
+      top = rect.bottom + tooltipOffset
+      left = rect.left + rect.width / 2
+      break
+
+    case "left":
+      top = rect.top + rect.height / 2
+      left = rect.left - tooltipOffset
+      break
+
+    case "right":
+      top = rect.top + rect.height / 2
+      left = rect.right + tooltipOffset
+      break
+
+    default:
+      top = rect.bottom + tooltipOffset
+      left = rect.left + rect.width / 2
+  }
+
+  setScale(1)
+
+  setPosition({
+    top,
+    left
+  })
+}, [
+  followCursor,
+  fitViewport,
+  placement
+])
 
   const showTooltip = useCallback((event) => {
-    const rect = event.currentTarget.getBoundingClientRect()
-    updatePosition(rect)
+    const rect =
+      event.currentTarget.getBoundingClientRect()
+
+    updatePosition(rect, event)
+
     timeoutRef.current = setTimeout(() => {
       setVisible(true)
     }, delay)
-  }, [delay, updatePosition])
+  }, [
+    delay,
+    updatePosition
+  ])
 
   const hideTooltip = useCallback(() => {
     if (timeoutRef.current) {
@@ -176,23 +296,59 @@ export default function Tooltip({
         {...props}
         onMouseEnter={showTooltip}
         onMouseLeave={hideTooltip}
-        onMouseMove={(e) => updatePosition(e.currentTarget.getBoundingClientRect())}
+        onMouseMove={event => {
+          updatePosition(
+            event.currentTarget.getBoundingClientRect(),
+            event
+          )
+        }}
         $customStyle={customStyle}
       >
         {children}
       </TooltipWrapper>
       {portalRoot.current && createPortal(
-        <TooltipContent 
+        <TooltipContent
+          ref={tooltipRef}
           $visible={visible}
-          $placement={placement}
+          $placement={followCursor ? "right" : placement}
           $dark={dark}
-          style={{
-            transform: `translate(${position.left}px, ${position.top}px)`,
-            ...placement === 'top' && { transform: `translate(${position.left}px, ${position.top}px) translateY(-100%) translateX(-50%)` },
-            ...placement === 'bottom' && { transform: `translate(${position.left}px, ${position.top}px) translateX(-50%)` },
-            ...placement === 'left' && { transform: `translate(${position.left}px, ${position.top}px) translateX(-100%) translateY(-50%)` },
-            ...placement === 'right' && { transform: `translate(${position.left}px, ${position.top}px) translateY(-50%)` }
-          }}
+          style={
+            followCursor
+              ? {
+                  left: position.left,
+                  top: position.top,
+                  transform: `scale(${scale})`,
+                  transformOrigin: "top left"
+                }
+              : {
+                  transform:
+                    `translate(${position.left}px, ${position.top}px)`,
+
+                  ...(placement === "top" && {
+                    transform:
+                      `translate(${position.left}px, ${position.top}px) ` +
+                      `translateY(-100%) translateX(-50%)`
+                  }),
+
+                  ...(placement === "bottom" && {
+                    transform:
+                      `translate(${position.left}px, ${position.top}px) ` +
+                      `translateX(-50%)`
+                  }),
+
+                  ...(placement === "left" && {
+                    transform:
+                      `translate(${position.left}px, ${position.top}px) ` +
+                      `translateX(-100%) translateY(-50%)`
+                  }),
+
+                  ...(placement === "right" && {
+                    transform:
+                      `translate(${position.left}px, ${position.top}px) ` +
+                      `translateY(-50%)`
+                  })
+                }
+          }
         >
           {content}
         </TooltipContent>,

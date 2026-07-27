@@ -81,6 +81,313 @@ export const batchFetchActivities = async (addresses, network = 'mainnet', setti
     return
 }
 
+const waitForExplorerRetry = milliseconds => {
+    return new Promise(resolve => setTimeout(resolve, milliseconds))
+}
+
+
+const fetchExplorerPageWithRetry = async (
+    endpoint,
+    params = {},
+    attempts = 4
+) => {
+    let lastError
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+            const response = await axios.get(endpoint, {
+                params,
+                timeout: 30000
+            })
+
+            return response?.data ?? {}
+        } catch (error) {
+            lastError = error
+
+            const status =
+                error?.response?.status ?? "network error"
+
+            console.warn(
+                `Explorer request failed on attempt ${attempt}/${attempts}:`,
+                status,
+                endpoint
+            )
+
+            if (attempt < attempts) {
+                await waitForExplorerRetry(attempt * 1000)
+            }
+        }
+    }
+
+    throw lastError
+}
+
+
+/**
+ * Fetch every available transaction page for one wallet.
+ *
+ * This is intentionally separate from batchFetchActivities(), which should
+ * remain a lightweight recent-activity fetcher for the Activity page.
+ */
+export const fetchCompleteAddressTransactions = async (
+    address,
+    network = "mainnet",
+    settings = defaultSettings,
+    options = {}
+) => {
+    const {
+        maxPages = 250,
+        delayBetweenPages = 150,
+        retryAttempts = 4,
+        onProgress = null
+    } = options
+
+    if (!address) {
+        return []
+    }
+
+    const normalizedAddress =
+        address.toLowerCase().trim()
+
+    if (!isValidWalletAddress(normalizedAddress)) {
+        throw new Error(
+            `Cannot fetch transaction history for invalid address: ${address}`
+        )
+    }
+
+    const scanApi =
+        settings?.scan?.[network]
+
+    if (!scanApi) {
+        throw new Error(
+            `No explorer API is configured for network: ${network}`
+        )
+    }
+
+    const endpoint =
+        `${scanApi}/v2/addresses/${normalizedAddress}/transactions`
+
+    const transactions = []
+    const seenTransactionHashes = new Set()
+    const seenPageCursors = new Set()
+
+    let nextPageParams = null
+    let pageNumber = 0
+
+    do {
+        if (pageNumber >= maxPages) {
+            throw new Error(
+                `Transaction history exceeded the ${maxPages}-page safety limit for ${normalizedAddress}`
+            )
+        }
+
+        /*
+         * Do not send `filter: "to | from"`.
+         *
+         * Blockscout accepts "to", "from", or no filter.
+         * Omitting it retrieves transactions in both directions.
+         */
+        const params = {
+            ...(nextPageParams ?? {})
+        }
+
+        const pageData =
+            await fetchExplorerPageWithRetry(
+                endpoint,
+                params,
+                retryAttempts
+            )
+
+        const pageItems =
+            Array.isArray(pageData?.items)
+                ? pageData.items
+                : []
+
+        if (typeof onProgress === "function") {
+            onProgress({
+                address: normalizedAddress,
+                page: pageNumber + 1,
+                collected:
+                    transactions.length +
+                    pageItems.length,
+                network
+            })
+        }
+        pageItems.forEach(transaction => {
+            const transactionHash =
+                transaction?.hash?.toLowerCase()
+
+            if (
+                transactionHash &&
+                seenTransactionHashes.has(
+                    transactionHash
+                )
+            ) {
+                return
+            }
+
+            if (transactionHash) {
+                seenTransactionHashes.add(
+                    transactionHash
+                )
+            }
+
+            transactions.push({
+                ...transaction,
+                originating_address:
+                    normalizedAddress
+            })
+        })
+
+        const newNextPageParams =
+            pageData?.next_page_params ?? null
+
+        if (newNextPageParams) {
+            const cursorKey =
+                JSON.stringify(
+                    newNextPageParams
+                )
+
+            if (
+                seenPageCursors.has(cursorKey)
+            ) {
+                throw new Error(
+                    `Explorer returned a repeated pagination cursor for ${normalizedAddress}`
+                )
+            }
+
+            seenPageCursors.add(cursorKey)
+        }
+
+        nextPageParams =
+            newNextPageParams
+
+        pageNumber += 1
+
+        if (
+            nextPageParams &&
+            delayBetweenPages > 0
+        ) {
+            await waitForExplorerRetry(
+                delayBetweenPages
+            )
+        }
+    } while (nextPageParams)
+
+
+    return transactions
+}
+
+
+/**
+ * Fetch complete transaction histories for multiple wallets.
+ *
+ * One wallet failing does not discard histories successfully fetched for
+ * other wallets. Failures are returned separately so the UI can avoid
+ * presenting partial data as a complete DCA calculation.
+ */
+export const batchFetchCompleteActivities = async (
+    addresses = [],
+    network = "mainnet",
+    settings = defaultSettings,
+    options = {}
+) => {
+    const uniqueAddresses = [
+        ...new Set(
+            addresses
+                .filter(Boolean)
+                .map(address => address.toLowerCase().trim())
+        )
+    ]
+
+    if (uniqueAddresses.length === 0) {
+        return {
+            activities: {},
+            errors: {}
+        }
+    }
+
+    const activities = {}
+    const errors = {}
+
+    for (const address of uniqueAddresses) {
+        try {
+            const transactions =
+                await fetchCompleteAddressTransactions(
+                    address,
+                    network,
+                    settings,
+                    options
+                )
+
+            activities[address] = transactions
+
+        } catch (error) {
+            activities[address] = []
+
+            errors[address] =
+                error?.message ??
+                "Unable to fetch complete transaction history"
+
+            console.error(
+                "HEX DCA WALLET HISTORY FAILED:",
+                address,
+                errors[address]
+            )
+        }
+
+        /*
+        * The explorer is unstable when multiple long histories are requested.
+        * Pause before starting the next wallet.
+        */
+        await waitForExplorerRetry(1000)
+    }
+
+    return {
+        activities,
+        errors
+    }
+}
+
+
+/**
+ * Fetch the full explorer record for one transaction, including its actual
+ * token_transfers array.
+ */
+export const fetchExplorerTransaction = async (
+    transactionHash,
+    network = "mainnet",
+    settings = defaultSettings,
+    options = {}
+) => {
+    const {
+        retryAttempts = 4
+    } = options
+
+    if (!transactionHash) {
+        throw new Error(
+            "A transaction hash is required"
+        )
+    }
+
+    const scanApi = settings?.scan?.[network]
+
+    if (!scanApi) {
+        throw new Error(
+            `No explorer API is configured for network: ${network}`
+        )
+    }
+
+    const endpoint =
+        `${scanApi}/v2/transactions/${transactionHash}`
+
+    return fetchExplorerPageWithRetry(
+        endpoint,
+        {},
+        retryAttempts
+    )
+}
+
 // Helper function to create RPC provider with fallback
 export const createProvider = (rpcs) => { 
     const provider = new ethers.providers.FallbackProvider(
@@ -1422,41 +1729,124 @@ export const batchFindPulseXPairs = async (addresses, network = 'mainnet', setti
         for (let i = 0; i < addresses.length; i += BATCH_SIZE) {
             const batch = new web3.BatchRequest()
             const currentBatch = addresses.slice(i, i + BATCH_SIZE)
-            
-            await new Promise((resolve) => {
-                let completed = 0
-                const totalCalls = currentBatch.length * 2 // Check both token orders
 
-                currentBatch.forEach(tokenAddress => {
-                    // Check both possible pair combinations
-                    batch.add(
-                        factoryContract.methods.getPair(WPLS, tokenAddress).call.request({}, (error, pair) => {
-                            if (!error && pair && pair !== '0x0000000000000000000000000000000000000000') {
-                                validPairs.push({
-                                    a: tokenAddress,
-                                    v: 'v2',
-                                    pairAddress: pair.toLowerCase(),
-                                    needsVerification: true
-                                })
-                            }
-                            completed++
-                            if (completed === totalCalls) resolve()
-                        })
+            await new Promise(resolve => {
+                let completed = 0
+
+                // Two token orders across both V1 and V2 factories
+                const totalCalls = currentBatch.length * 4
+
+                const finishCall = () => {
+                    completed += 1
+
+                    if (completed === totalCalls) {
+                        resolve()
+                    }
+                }
+
+                const addValidPair = (
+                    tokenAddress,
+                    version,
+                    pairAddress
+                ) => {
+                    if (
+                        !pairAddress ||
+                        pairAddress ===
+                            '0x0000000000000000000000000000000000000000'
+                    ) {
+                        return
+                    }
+
+                    const normalizedPairAddress =
+                        pairAddress.toLowerCase()
+
+                    const alreadyAdded = validPairs.some(existingPair =>
+                        existingPair.v === version &&
+                        existingPair.pairAddress === normalizedPairAddress
                     )
 
+                    if (alreadyAdded) {
+                        return
+                    }
+
+                    validPairs.push({
+                        a: tokenAddress.toLowerCase(),
+                        v: version,
+                        pairAddress: normalizedPairAddress,
+                        needsVerification: true
+                    })
+                }
+
+                currentBatch.forEach(tokenAddress => {
+                    const normalizedTokenAddress =
+                        tokenAddress.toLowerCase()
+
+                    // PulseX V2: WPLS/token
                     batch.add(
-                        v1Factory.methods.getPair(tokenAddress, WPLS).call.request({}, (error, pair) => {
-                            if (!error && pair && pair !== '0x0000000000000000000000000000000000000000') {
-                                validPairs.push({
-                                    a: tokenAddress,
-                                    v: 'v1',
-                                    pairAddress: pair.toLowerCase(),
-                                    needsVerification: true
-                                })
-                            }
-                            completed++
-                            if (completed === totalCalls) resolve()
-                        })
+                        factoryContract.methods
+                            .getPair(WPLS, normalizedTokenAddress)
+                            .call.request({}, (error, pairAddress) => {
+                                if (!error) {
+                                    addValidPair(
+                                        normalizedTokenAddress,
+                                        'v2',
+                                        pairAddress
+                                    )
+                                }
+
+                                finishCall()
+                            })
+                    )
+
+                    // PulseX V2: token/WPLS
+                    batch.add(
+                        factoryContract.methods
+                            .getPair(normalizedTokenAddress, WPLS)
+                            .call.request({}, (error, pairAddress) => {
+                                if (!error) {
+                                    addValidPair(
+                                        normalizedTokenAddress,
+                                        'v2',
+                                        pairAddress
+                                    )
+                                }
+
+                                finishCall()
+                            })
+                    )
+
+                    // PulseX V1: WPLS/token
+                    batch.add(
+                        v1Factory.methods
+                            .getPair(WPLS, normalizedTokenAddress)
+                            .call.request({}, (error, pairAddress) => {
+                                if (!error) {
+                                    addValidPair(
+                                        normalizedTokenAddress,
+                                        'v1',
+                                        pairAddress
+                                    )
+                                }
+
+                                finishCall()
+                            })
+                    )
+
+                    // PulseX V1: token/WPLS
+                    batch.add(
+                        v1Factory.methods
+                            .getPair(normalizedTokenAddress, WPLS)
+                            .call.request({}, (error, pairAddress) => {
+                                if (!error) {
+                                    addValidPair(
+                                        normalizedTokenAddress,
+                                        'v1',
+                                        pairAddress
+                                    )
+                                }
+
+                                finishCall()
+                            })
                     )
                 })
 
@@ -1542,5 +1932,125 @@ export const batchFindPulseXPairs = async (addresses, network = 'mainnet', setti
     } catch (error) {
         console.error('Error in batchFindPulseXPairs:', error)
         return []
+    }
+    
+}
+export const fetchTransactionReceipt = async (
+    transactionHash,
+    network = "mainnet",
+    settings = defaultSettings
+) => {
+    if (!transactionHash) {
+        throw new Error("Transaction hash required")
+    }
+
+    const provider = createProvider(settings.rpcs[network])
+
+    const timeoutMilliseconds = 15000
+
+    const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => {
+            reject(
+                new Error(
+                    `RPC receipt request timed out after ${
+                        timeoutMilliseconds / 1000
+                    } seconds`
+                )
+            )
+        }, timeoutMilliseconds)
+    })
+
+    return await Promise.race([
+        provider.getTransactionReceipt(transactionHash),
+        timeoutPromise
+    ])
+}
+
+// ERC20 Transfer(address,address,uint256)
+const TRANSFER_TOPIC =
+    ethers.utils.id("Transfer(address,address,uint256)")
+
+export const decodeTransferLogs = async (
+    transactionHash,
+    network = "mainnet",
+    settings = defaultSettings,
+    options = {}
+) => {
+    const {
+        includeMetadata = false
+    } = options
+
+    const receipt = await fetchTransactionReceipt(
+        transactionHash,
+        network,
+        settings
+    )
+
+    if (!receipt) {
+        return includeMetadata
+            ? {
+                transfers: [],
+                blockNumber: null,
+                timestamp: null
+            }
+            : []
+    }
+
+    const transfers = []
+
+    for (const log of receipt.logs ?? []) {
+        if (
+            !log.topics ||
+            log.topics.length !== 3 ||
+            log.topics[0] !== TRANSFER_TOPIC
+        ) {
+            continue
+        }
+
+        const from = ethers.utils.getAddress(
+            "0x" + log.topics[1].slice(26)
+        )
+
+        const to = ethers.utils.getAddress(
+            "0x" + log.topics[2].slice(26)
+        )
+
+        const value = BigInt(log.data)
+
+        transfers.push({
+            tokenAddress: log.address.toLowerCase(),
+            from: from.toLowerCase(),
+            to: to.toLowerCase(),
+            value
+        })
+    }
+
+    if (!includeMetadata) {
+        return transfers
+    }
+
+    const provider = createProvider(
+        settings.rpcs[network]
+    )
+
+    const block = await provider.getBlock(
+        receipt.blockNumber
+    )
+
+    if (
+        !block ||
+        !Number.isFinite(Number(block.timestamp))
+    ) {
+        throw new Error(
+            `Unable to retrieve the PulseChain block timestamp for ${transactionHash}`
+        )
+    }
+
+    return {
+        transfers,
+        blockNumber: Number(receipt.blockNumber),
+        timestamp: new Date(
+            Number(block.timestamp) * 1000
+        ).toISOString()
     }
 }

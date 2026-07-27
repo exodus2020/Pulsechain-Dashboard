@@ -290,7 +290,23 @@ function TokensModal({ wplsPrice }) {
     const info = results[i]?.info;
     const balance = results[i]?.balance ?? 0;
     
-    if (liquidityPairs[results[i]?.id ?? '']) return null
+    const selectableDefaultTokens = [
+        '0xefd766ccb38eaf1dfd701853bfce31359239f305', // DAI
+        '0x15d38573d2feeb82e7ad5187ab8c1d52810b1f07', // USDC
+        '0x0cb6f5a34ad42ec934882a05265a7d5f59b51a2f', // USDT
+        '0x02dcdd04e3f455d838cd1249292c58f3b79e3c3c', // WETH
+        '0xb17d901469b9208b17d916112988a3fed19b5ca1'  // WBTC
+    ]
+
+    const isSelectableDefaultToken =
+        selectableDefaultTokens.includes(address?.toLowerCase())
+
+    if (
+        liquidityPairs[results[i]?.id ?? ''] &&
+        !isSelectableDefaultToken
+    ) {
+        return null
+    }
 
     const isSelected = selectedTokens.some(t => t?.id === results[i]?.id)
 
@@ -361,15 +377,22 @@ function TokensModal({ wplsPrice }) {
 
   const handleToggleTokens = () => {
     selectedTokens.forEach(token => {
-      if (token.isHidden) {
-          context.unhideToken(token.token?.address || token.id)
-      }
-  })
+        if (token.isHidden || token.isSelectableDefault) {
+            context.unhideToken(
+                token.token?.address || token.id
+            )
+        }
+    })
 
-  context.massToggleWatchlist(selectedTokens.filter(t => !t.isHidden))
+    context.massToggleWatchlist(
+        selectedTokens.filter(token =>
+            !token.isHidden &&
+            !token.isSelectableDefault
+        )
+    )
 
     setModal(false)
-  }
+}
 
   if (showScanPrompt) {
     return (
@@ -463,12 +486,19 @@ function TokensModal({ wplsPrice }) {
                       }).filter(token => token?.token?.address)
 
                       allTokens.forEach(token => {
-                        if (token.isHidden) {
-                          context.unhideToken(token.token.address || token.id)
-                        }
+                          if (token.isHidden || token.isSelectableDefault) {
+                              context.unhideToken(
+                                  token.token?.address || token.id
+                              )
+                          }
                       })
 
-                      context.massToggleWatchlist(allTokens.filter(t => !t.isHidden))
+                      context.massToggleWatchlist(
+                          allTokens.filter(token =>
+                              !token.isHidden &&
+                              !token.isSelectableDefault
+                          )
+                      )
 
                       setModal(false)
                     }}

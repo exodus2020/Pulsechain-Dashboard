@@ -1,3 +1,4 @@
+//useHex
 import { useAtom } from "jotai"
 import { useState, useEffect, useRef } from "react"
 import { appSettingsAtom } from "../store"

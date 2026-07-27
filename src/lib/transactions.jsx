@@ -1,3 +1,4 @@
+//transaction.jsx
 export function decodeTransaction (tx) {
     const toName = tx?.to?.name
 

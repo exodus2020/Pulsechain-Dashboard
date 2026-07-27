@@ -1,10 +1,14 @@
+//useTokenSearch.jsx
 import axios from "axios"
 import { useEffect, useRef, useState } from "react"
 import { getSearchQuery, GRAPHQL_PULSEX, GRAPHQL_PULSEX_V2 } from "../lib/graphiql"
 import { appSettingsAtom } from "../store"
 import { useAtom } from "jotai"
 import { batchFetchTokenInfo, batchFindPulseXPairs, findAndValidatePulseXPair } from "../lib/web3"
-import { defaultTokenInformation } from "../lib/tokens"
+import {
+    defaultTokenInformation,
+    liquidityPairs
+} from "../lib/tokens"
 import { useSettings } from "./useSettings"
 
 export default function useTokenSearch ({searchTerm, filter = true, wallets, watchlistAddresses, wplsPrice}) {
@@ -28,41 +32,138 @@ export default function useTokenSearch ({searchTerm, filter = true, wallets, wat
         
         const results = responses.filter(f => f.status === 'fulfilled').map(r => r.value.data).flat()
         const dupesRemoved = []
+
         results.forEach(fe => {
-            if (defaultTokenInformation[fe.token.address.toLowerCase()]) return
-            if (!dupesRemoved.some(s => s.token.address == fe.token.address)) {
-                const totalValue = results.filter(f => f.token.address == fe.token.address).reduce((acc, curr) => acc + BigInt(curr.value), BigInt(0))
-                dupesRemoved.push({...fe, value: totalValue.toString()})
+            const tokenAddress = fe?.token?.address?.toLowerCase()
+            if (!tokenAddress) return
+
+            if (!dupesRemoved.some(s =>
+                s?.token?.address?.toLowerCase() === tokenAddress
+            )) {
+                const totalValue = results
+                    .filter(f =>
+                        f?.token?.address?.toLowerCase() === tokenAddress
+                    )
+                    .reduce(
+                        (acc, curr) => acc + BigInt(curr?.value ?? 0),
+                        0n
+                    )
+
+                dupesRemoved.push({
+                    ...fe,
+                    value: totalValue.toString()
+                })
             }
         })
 
-        if (dupesRemoved.length > 0) {
+        {
+            // Get clean addresses and filter out ones already in watchlist
             // Get clean addresses and filter out ones already in watchlist
             const cleanedAddresses = dupesRemoved
-                .map(m => (m?.token?.address ?? '')?.toLowerCase())
-                .filter(address => !watchlistAddresses.some(watchlistAddr => 
-                    watchlistAddr.toLowerCase() === address.toLowerCase() || defaultTokenInformation[address.toLowerCase()]
-                ))
+                .map(m => (m?.token?.address ?? '').toLowerCase())
+                .filter(Boolean)
+                .filter(address =>
+                    !(watchlistAddresses ?? []).some(
+                        watchlistAddr => watchlistAddr.toLowerCase() === address
+                    )
+                )
 
-            if (cleanedAddresses.length === 0) {
+            const selectableDefaultAddresses = [
+                '0xefd766ccb38eaf1dfd701853bfce31359239f305', // DAI
+                '0x15d38573d2feeb82e7ad5187ab8c1d52810b1f07', // USDC
+                '0x0cb6f5a34ad42ec934882a05265a7d5f59b51a2f', // USDT
+                '0x02dcdd04e3f455d838cd1249292c58f3b79e3c3c', // WETH
+                '0xb17d901469b9208b17d916112988a3fed19b5ca1'  // WBTC
+            ]
+
+            const availableDefaultAddresses =
+                selectableDefaultAddresses.filter(address =>
+                    !(watchlistAddresses ?? []).some(
+                        watchlistAddress =>
+                            watchlistAddress.toLowerCase() === address
+                    )
+                )
+
+            if (
+                cleanedAddresses.length === 0 &&
+                availableDefaultAddresses.length === 0
+            ) {
                 setData([])
                 setIsScanning(false)
                 return
             }
 
-            const lpData = await batchFindPulseXPairs(cleanedAddresses, 'mainnet', settings)
-            
-            const lpDataModified = lpData.map(m => {
-                const tokenInfo = results.find(f => f?.token?.address?.toLowerCase() === m?.a?.toLowerCase())
-                const isToken0 = m?.a?.toLowerCase() === m?.token0?.a?.toLowerCase()
+            const lpData = cleanedAddresses.length > 0
+                ? await batchFindPulseXPairs(
+                    cleanedAddresses,
+                    'mainnet',
+                    settings
+                )
+                : []
 
-                const wplsInfo = { ...defaultTokenInformation['0xa1077a294dde1b09bb078844df40758a5d0f9a27'], id: '0xa1077a294dde1b09bb078844df40758a5d0f9a27', derivedUSD: wplsPrice }
+            const selectableDefaultPairs = Object.values(liquidityPairs)
+                .filter(pair => {
+                    const tokenAddress = pair?.a?.toLowerCase()
+
+                    return availableDefaultAddresses.includes(tokenAddress)
+                })
+                .map(pair => ({
+                    ...pair,
+                    pairId: pair.id,
+                    version: 'default',
+                    isSelectableDefault: true,
+                    token0: {
+                        ...pair.token0,
+                        a: pair.token0?.id,
+                        reserves: pair.reserve0 ?? '0'
+                    },
+                    token1: {
+                        ...pair.token1,
+                        a: pair.token1?.id,
+                        reserves: pair.reserve1 ?? '0'
+                    }
+                }))
+
+            const combinedLpData = [
+                ...(lpData ?? []).filter(pair =>
+                    !availableDefaultAddresses.includes(
+                        pair?.a?.toLowerCase()
+                    )
+                ),
+                ...selectableDefaultPairs
+            ]
+            
+            const lpDataModified = combinedLpData.map(m => {
+                const tokenAddress = m?.a?.toLowerCase()
+
+                const tokenInfo = results.find(
+                    item =>
+                        item?.token?.address?.toLowerCase() === tokenAddress
+                )
+
+                const defaultInfo =
+                    defaultTokenInformation[tokenAddress] ?? {}
+
+                const isToken0 =
+                    tokenAddress === m?.token0?.a?.toLowerCase()
+
+                const wplsInfo = {
+                    ...defaultTokenInformation[
+                        '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
+                    ],
+                    id: '0xa1077a294dde1b09bb078844df40758a5d0f9a27',
+                    derivedUSD: wplsPrice
+                }
                 
                 // Get reserves and decimals
                 const tokenReserves = isToken0 ? m.token0.reserves : m.token1.reserves
                 const wplsReserves = isToken0 ? m.token1.reserves : m.token0.reserves
                 const wplsNormalizedReserves = parseFloat(parseFloat(BigInt(isToken0 ? m.token1.reserves : m.token0.reserves ?? 0) / BigInt(10**14)) / 10**4 ).toFixed(4)
-                const tokenDecimals = parseInt(tokenInfo?.token?.decimals ?? '18')
+                const tokenDecimals = parseInt(
+                    tokenInfo?.token?.decimals ??
+                    defaultInfo?.decimals ??
+                    '18'
+                )
                 const wplsDecimals = 18 // WPLS always has 18 decimals
 
                 // Calculate price in WPLS
@@ -83,7 +184,9 @@ export default function useTokenSearch ({searchTerm, filter = true, wallets, wat
                 const derivedUSD = normalizedPriceWpls * wplsPrice
                 const reserveUSD = wplsNormalizedReserves * wplsPrice
 
-                if (reserveUSD < 1_000) return undefined
+                if (!m?.isSelectableDefault && reserveUSD < 1_000) {
+                    return undefined
+                }
                 
                 const value = tokenInfo?.value ? BigInt(tokenInfo.value) : BigInt(0);
                 let balance = 0;
@@ -99,8 +202,39 @@ export default function useTokenSearch ({searchTerm, filter = true, wallets, wat
                     balance = 0;
                 }
 
+                const tokenName =
+                    tokenInfo?.token?.name ??
+                    defaultInfo?.name ??
+                    'Unknown Token'
+
+                const tokenSymbol =
+                    tokenInfo?.token?.symbol ??
+                    defaultInfo?.symbol ??
+                    '???'
+
+                const tokenResultInfo = tokenInfo ?? {
+                    token: {
+                        address: tokenAddress,
+                        name: tokenName,
+                        symbol: tokenSymbol,
+                        decimals: String(tokenDecimals)
+                    },
+                    value: '0'
+                }
+
+                const tokenSide = {
+                    ...(isToken0 ? m?.token0 : m?.token1),
+                    id: tokenAddress,
+                    a: tokenAddress,
+                    decimals: tokenDecimals,
+                    total_supply: tokenInfo?.token?.total_supply,
+                    name: tokenName,
+                    symbol: tokenSymbol,
+                    derivedUSD
+                }
+
                 const result = {
-                    a: m?.a,
+                    a: tokenAddress,
                     balance,
                     version: m?.version,
                     pairId: m?.pairId,
@@ -108,41 +242,27 @@ export default function useTokenSearch ({searchTerm, filter = true, wallets, wat
                     priceWpls: normalizedPriceWpls,
                     reserveUSD,
                     derivedUSD,
-                    info: tokenInfo,
-                    token0: isToken0 ? {
-                        ...(m?.token0 ?? {}),
-                        id: m?.token0?.a,
-                        decimals: tokenDecimals,
-                        total_supply: tokenInfo?.token?.total_supply,
-                        name: tokenInfo?.token?.name,
-                        symbol: tokenInfo?.token?.symbol,
-                        derivedUSD
-                    } : wplsInfo,
-                    token1: isToken0 ? wplsInfo : {
-                        ...(m?.token1 ?? {}),
-                        id: m?.token1?.a,
-                        decimals: tokenDecimals,
-                        total_supply: tokenInfo?.token?.total_supply,
-                        name: tokenInfo?.token?.name,
-                        symbol: tokenInfo?.token?.symbol,
-                        derivedUSD
-                    }
+                    info: tokenResultInfo,
+                    isSelectableDefault: m?.isSelectableDefault === true,
+                    token0: isToken0
+                        ? tokenSide
+                        : wplsInfo,
+                    token1: isToken0
+                        ? wplsInfo
+                        : tokenSide
                 }
 
                 return result
             }).filter(f => f !== undefined)
            
             setData(lpDataModified ?? [])
-            
+
             setIsScanning(false)
             return
-        } else {
-            setData([])
-            setIsScanning(false)
-        }
-    }
+                    }
+                }
 
-    useEffect(() => {
+                useEffect(() => {
         const fetchResults = async () => {
             if (isLoading.current) return
             isLoading.current = true
@@ -211,5 +331,11 @@ export default function useTokenSearch ({searchTerm, filter = true, wallets, wat
         }
     }, [searchTerm, filter])
 
-    return { isLoading: isLoading.current || isScanning, isError, data, noResults, scanForTokens }
-}
+    return {
+        isLoading: isLoading.current || isScanning,
+        isError,
+        data,
+        noResults,
+        scanForTokens
+    }
+    }

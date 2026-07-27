@@ -1,4 +1,4 @@
-// useFilterBalance.jsx
+//useFilterBalance.jsx
 import React, { useMemo } from "react"
 import { hiddenWalletsAtom } from "../store"
 import { defaultTokenInformation, liquidityPairs } from "../lib/tokens"
@@ -21,9 +21,13 @@ export default function useFilterBalance({ balanceData, farmData, lpData, hidden
         displayLiquidityPools 
     } = useMemo(() => {
         // use balances instead of combinedBalances when filtering
-        const addressData = Object.keys(hiddenWallets).length === 0 
-        ? balanceData?.combinedBalances 
-        : Object.keys(visibleWallets).reduce((acc, walletAddress) => {
+        const hasVisibleWallets = Object.keys(visibleWallets ?? {}).length > 0
+
+        const addressData = !hasVisibleWallets
+            ? {}
+            : Object.keys(hiddenWallets).length === 0
+                ? balanceData?.combinedBalances
+                : Object.keys(visibleWallets).reduce((acc, walletAddress) => {
             const walletBalances = balanceData?.balances?.[walletAddress]?.balances ?? {}
             Object.entries(walletBalances).forEach(([tokenAddress, balance]) => {
                 if (!acc[tokenAddress]) {
@@ -41,9 +45,11 @@ export default function useFilterBalance({ balanceData, farmData, lpData, hidden
         return acc + (addressData[i]?.usd ?? 0);
     }, 0);
         // use farmBalances instead of combinedBalances when filtering
-        const farm = Object.keys(hiddenWallets).length === 0 
-        ? farmData?.combinedBalances ?? {}
-        : Object.entries(farmData?.farmBalances ?? {}).reduce((acc, [walletAddress, walletFarms]) => {
+        const farm = !hasVisibleWallets
+            ? {}
+            : Object.keys(hiddenWallets).length === 0
+                ? farmData?.combinedBalances ?? {}
+                : Object.entries(farmData?.farmBalances ?? {}).reduce((acc, [walletAddress, walletFarms]) => {
             // Skip if wallet is hidden
             if (!visibleWallets[walletAddress]) return acc
 
@@ -108,9 +114,11 @@ export default function useFilterBalance({ balanceData, farmData, lpData, hidden
         })
     
         // Filter LP balances for visible wallets
-        const lps = Object.keys(hiddenWallets).length === 0 
-            ? lpData?.combinedBalances ?? {}
-            : Object.entries(lpData?.lpBalances ?? {}).reduce((acc, [walletAddress, walletLPs]) => {
+        const lps = !hasVisibleWallets
+            ? {}
+            : Object.keys(hiddenWallets).length === 0
+                ? lpData?.combinedBalances ?? {}
+                : Object.entries(lpData?.lpBalances ?? {}).reduce((acc, [walletAddress, walletLPs]) => {
                 // Skip if wallet is hidden
                 if (!visibleWallets[walletAddress]) return acc
     
@@ -200,7 +208,15 @@ export default function useFilterBalance({ balanceData, farmData, lpData, hidden
         return {
             addressFarmRewards, lps, farm, displayLps, addressLps, displayFarms, addressFarms, addressData, addressBalances, displayDefaultTokens, displayLiquidityPools
         }
-    }, [balanceData, farmData, lpData, hiddenWallets, hideZeroValue, data?.lpWatchlist])
+    }, [
+        balanceData,
+        farmData,
+        lpData,
+        hiddenWallets,
+        visibleWallets,
+        hideZeroValue,
+        data?.lpWatchlist
+    ])
 
     return {
         addressFarmRewards, lps, farm, displayLps, addressLps, displayFarms, addressFarms, addressData, addressBalances, displayDefaultTokens, displayLiquidityPools

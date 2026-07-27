@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import 'typeface-raleway'
 import Layout from './shared/Layout'
-import { appPageAtom, dappModalAtom, keyAtom, liquidityPoolModalAtom, settingsModalAtom, tokenModalAtom, tokensModalAtom, walletsModalAtom, toastAtom, appSettingsAtom, liquiditySearchModalAtom, deleteDataModalAtom } from './store'
+import { appPageAtom, dappModalAtom, keyAtom, liquidityPoolModalAtom, settingsModalAtom, tokenModalAtom, tokensModalAtom, walletsModalAtom, toastAtom, appSettingsAtom, liquiditySearchModalAtom, deleteDataModalAtom, hiddenWalletsAtom } from './store'
 import { useAtom } from 'jotai'
 import DappModal from './shared/DappModal'
 import styled from 'styled-components'
@@ -25,6 +25,7 @@ import LiquiditySearchModal from './shared/LiquiditySearchModal'
 import useHistory from './hooks/useHistory'
 import WalletsPage from './pages/WalletsPage'
 import useHex from './hooks/useHex'
+import useHexDca from "./hooks/useHexDca"
 import DeleteDataModal from './shared/DeleteDataModal'
 import Button from './components/Button'
 import Icon from './components/Icon'
@@ -150,6 +151,7 @@ function AppMain({context}) {
   const [ liquiditySearchModal ] = useAtom(liquiditySearchModalAtom)
   const [ toast, setToast ] = useAtom(toastAtom)
   const [settings] = useAtom(appSettingsAtom)
+  const [hiddenWallets] = useAtom(hiddenWalletsAtom)
 
   const { mode, toggleMode } = useHotKeys()
 
@@ -158,6 +160,10 @@ function AppMain({context}) {
   const balanceData = useGetBalance(priceData)
   const farmData = useFarms({context, priceData})
   const hexData = useHex({ wallets: context?.data?.wallets ?? {} })
+  const hexDcaData = useHexDca({
+    wallets: context?.data?.wallets ?? {},
+    hiddenWallets
+})
   const lpData = useLPs({context, priceData})
   const historyData = useHistory({ priceData })
   const communityData = useCommunityDapp(context)
@@ -183,14 +189,14 @@ function AppMain({context}) {
   return (
     <AppWrapper>
         <Layout fees={fees} toggleMode={toggleMode}>
-          {!appPage ? <WalletsPage priceData={priceData} balanceData={balanceData} farmData={farmData} lpData={lpData} historyData={historyData} hexData={hexData}/> : ''}
+          {!appPage ? <WalletsPage priceData={priceData} balanceData={balanceData} farmData={farmData} lpData={lpData} historyData={historyData} hexData={hexData} hexDcaData={hexDcaData}/> : ''}
           {appPage == 'activities' ? <ActivitiesPage priceData={priceData} balanceData={balanceData} farmData={farmData}/> : ''}
         </Layout>
         <div className="small-on-mobile">
           {modal ? <DappModal communityData={communityData} /> : ''}
           {tokenModal ? <TokensModal wplsPrice={wplsPrice} /> : ''}
           {singleTokenModal ? <TokenModal balanceData={balanceData} historyData={historyData} bestStable={bestStable}/> : ''}
-          {walletsModal ? <WalletsModal balanceData={balanceData} farmData={farmData} lpData={lpData} prices={prices} hexData={hexData}/> : ''}
+          {walletsModal ? <WalletsModal balanceData={balanceData} farmData={farmData} lpData={lpData} prices={prices} hexData={hexData} hexDcaData={hexDcaData}/> : ''}
           {settingsModal ? <SettingsModal context={context} /> : ''}
           {liquidityPoolModal ? <LiquidityPoolModal /> : ''}
           {liquiditySearchModal ? <LiquiditySearchModal /> : ''}

@@ -1,3 +1,4 @@
+//wallets modal for adding and removing wallet addresses
 import { useAtom } from 'jotai'
 import styled from 'styled-components'
 import 'typeface-raleway'

@@ -4,6 +4,109 @@ Privacy-first portfolio tracker for PulseChain assets with real-time pricing and
 
 > Built for privacy. Runs locally. No tracking. No middlemen.
 
+## 📸 Screenshots
+
+PulseChain Dashboard provides an all-in-one desktop interface for tracking portfolios, HEX staking, liquidity positions, and multi-chain analytics.
+
+<br>
+
+<table>
+<tr>
+<td align="center"><strong>Dashboard Overview</strong></td>
+<td align="center"><strong>Lifetime HEX DCA</strong></td>
+</tr>
+
+<tr>
+<td align="center">
+<img src="public/Screenshots/Overview.png" width="500" alt="Dashboard Overview">
+</td>
+<td align="center">
+<img src="public/Screenshots/2.2.0/Detailed tooltip of average entry.png" width="500" alt="Lifetime HEX DCA">
+</td>
+</tr>
+
+<tr>
+<td align="center">
+The complete portfolio dashboard with real-time balances, market data, and analytics.
+</td>
+<td align="center">
+View your weighted lifetime HEX average entry price using historical purchases from Ethereum and PulseChain.
+</td>
+</tr>
+
+<tr>
+<td height="25"></td>
+<td></td>
+</tr>
+
+<tr>
+<td align="center"><strong>Multiple Wallet Tracking</strong></td>
+<td align="center"><strong>Multi-Chain Analytics</strong></td>
+</tr>
+
+<tr>
+<td align="center">
+<img src="public/Screenshots/2.2.0/Multiple wallet tracking.png" width="500" alt="Multiple Wallet Tracking">
+</td>
+<td align="center">
+<img src="public/Screenshots/2.2.0/Multiple wallets and multi-chain tracking.png" width="500" alt="Multi-Chain Analytics">
+</td>
+</tr>
+
+<tr>
+<td align="center">
+Track multiple wallets simultaneously while keeping balances organized.
+</td>
+<td align="center">
+Analyze purchases across multiple wallets and both supported blockchains using a combined weighted average entry price.
+</td>
+</tr>
+</table>
+
+## 🚀 v2.2.0 — Lifetime HEX DCA & Multi-Chain Purchase Tracking
+
+This release introduces one of the biggest upgrades to PulseChain Dashboard yet: **lifetime HEX dollar-cost averaging (DCA)** with historical purchase reconstruction across both Ethereum and PulseChain.
+
+### ✨ New Features
+
+- 📈 Lifetime HEX Dollar-Cost Average (DCA) tracking
+- ⛓️ Automatic reconstruction of lifetime HEX purchases across Ethereum and PulseChain
+- 💰 Historical pricing using archived market data with automatic fallbacks
+- 🧮 Weighted lifetime average entry price calculation
+- 🌐 Combined multi-chain purchase history
+- 📊 Network-by-network purchase breakdown
+- 👛 Wallet-by-wallet DCA breakdown
+- 📉 Current profit/loss and return percentage based on your average entry
+
+### ⚡ Performance
+
+- Persistent caching of transaction history for dramatically faster reloads
+- Cached historical pricing to reduce API requests
+- Live progress updates while scanning wallet history
+- Improved reliability when processing large transaction histories
+
+### 🎨 UI / UX
+
+- Added **DCA Price** card to the HEX Miners dashboard
+- Detailed hover tooltip showing:
+  - Average Entry
+  - Current Price
+  - Current Value
+  - Total Spent
+  - Total HEX Purchased
+  - Network Breakdown
+  - Wallet Breakdown
+- Improved tooltip positioning for large data sets
+
+### 🛠 Under the Hood
+
+- Added Ethereum pre-PulseChain transaction scanning
+- Added dual-chain transaction scanning across Ethereum and PulseChain
+- Improved transaction parsing for routed swaps and multicall transactions
+- Added historical price lookup fallbacks for improved pricing accuracy
+- Improved error handling and recovery when historical pricing is unavailable
+- Reduced unnecessary blockchain requests through smarter caching
+
 ---
 
 ## 🚀 v2.1.3 — Price Accuracy & Metrics Sync
@@ -139,6 +242,7 @@ All data is stored locally and encrypted for maximum privacy.
 * 🔐 Fully local + encrypted data storage
 * ⚡ Real-time price updates
 * 🧾 HEX stake tracking and analytics
+* 📈 Lifetime HEX DCA tracking across Ethereum & PulseChain
 * 🔧 Custom RPC endpoints
 * 📁 Import / export encrypted portfolios
 * 🖥️ Cross-platform (Windows, MacOS, Linux)
@@ -183,7 +287,6 @@ npm install
 
 ```bash
 npm run dev
-npm start
 ```
 
 ---
