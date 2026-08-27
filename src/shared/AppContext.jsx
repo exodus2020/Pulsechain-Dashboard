@@ -6,7 +6,7 @@ import { shortenString } from '../lib/string';
 import { appSettingsAtom, hiddenWalletsAtom, keyAtom, urlsFetchedAtom } from '../store';
 import { useAtom } from 'jotai';
 import { decryptWithHashedKey, encryptWithHashedKey } from '../lib/crypto';
-import { defaultSettings } from '../config/settings';
+import { defaultSettings, migrateSettings } from '../config/settings';
 import { tokenref } from "../config/tokenref.js";
 import defaultMarket from "../config/market.json";
 
@@ -54,6 +54,7 @@ export const isKeyCorrect = async (key) => {
 // Context provider component
 export const AppContextProvider = ({ children }) => {
     const [ key, setKey ] = useAtom(keyAtom)
+    const [, setSettings] = useAtom(appSettingsAtom)
 
     const [initialized, setInit] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -156,11 +157,23 @@ export const AppContextProvider = ({ children }) => {
 
     if (response) {
         try {
-            const decryptedResponse = key ? await decryptWithHashedKey(key, response) : response
-            setData({
-                ...JSON.parse(decryptedResponse ?? '{}'),
+            const decryptedResponse = key
+                ? await decryptWithHashedKey(key, response)
+                : response
+
+            const parsedData = JSON.parse(decryptedResponse ?? '{}')
+
+            const migratedData = {
+                ...parsedData,
+                settings: migrateSettings(parsedData?.settings),
                 imageRef: imgRef ?? {}
-            })
+            }
+
+            setData(migratedData)
+            setSettings(migratedData.settings)
+
+            await saveData({ ...migratedData })
+
             setUpdate(prev => prev + 1)
         } catch (err) {
             console.error('Failed to parse config.json', err)

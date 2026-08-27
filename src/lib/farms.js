@@ -1,3 +1,4 @@
+//farms.js
 import { poolsAbi, lplAbi, poolsAddress } from './abi/pools'
 import { defaultSettings } from '../config/settings'
 import Web3 from 'web3'
@@ -14,6 +15,10 @@ const _fetchPoolInfo = async (provider) => {
     try {
         const web3 = new Web3(provider || 'https://rpc.pulsechain.com')
         const poolContract = new web3.eth.Contract(poolsAbi, poolsAddress)
+        const [incPerSecond, totalAllocPoint] = await Promise.all([
+            poolContract.methods.incPerSecond().call(),
+            poolContract.methods.totalAllocPoint().call()
+        ])
         
         // Get pool length first
         const poolLength = await poolContract.methods.poolLength().call()
@@ -38,7 +43,9 @@ const _fetchPoolInfo = async (provider) => {
                                             lpAddress: result.lpToken.toLowerCase(),
                                             allocPoints: result.allocPoint.toString(),
                                             lastRewardTime: result.lastRewardTime.toString(),
-                                            accIncPerShare: result.accIncPerShare.toString()
+                                            accIncPerShare: result.accIncPerShare.toString(),
+                                            incPerSecond: incPerSecond.toString(),
+                                            totalAllocPoint: totalAllocPoint.toString()
                                         }
                                     } catch (e) {
                                         console.error('Error processing result', i, e)
@@ -64,79 +71,97 @@ const _fetchPoolInfo = async (provider) => {
         const poolsInfo = await getPoolInfo()
 
         // Second stage: Get LP details for each pool
-        const lpDetailsPromise = Promise.all(poolsInfo.map(async (pool) => {
-            try {
-                const lpContract = new web3.eth.Contract(lplAbi, pool.lpAddress)
-                const lpBatch = new web3.BatchRequest()
-                
-                const lpDetailsPromise = new Promise((resolve) => {
-                    let completed = 0
-                    const lpDetails = {
-                        ...pool,
-                        reserves: {
-                            reserve0: '0',
-                            reserve1: '0',
-                            blockTimestamp: '0',
-                            totalSupply: '0'
+const lpDetailsPromise = Promise.all(poolsInfo.map(async (pool) => {
+    try {
+        const lpContract = new web3.eth.Contract(lplAbi, pool.lpAddress)
+        const lpBatch = new web3.BatchRequest()
+
+        const lpDetailsPromise = new Promise((resolve) => {
+            let completed = 0
+
+            const lpDetails = {
+                ...pool,
+                totalStaked: '0',
+                reserves: {
+                    reserve0: '0',
+                    reserve1: '0',
+                    blockTimestamp: '0',
+                    totalSupply: '0'
+                }
+            }
+
+            lpBatch.add(
+                lpContract.methods.getReserves().call.request((err, reserves) => {
+                    if (!err && reserves) {
+                        lpDetails.reserves = {
+                            ...lpDetails.reserves,
+                            reserve0: reserves['0'].toString(),
+                            reserve1: reserves['1'].toString(),
+                            blockTimestamp: reserves['2'].toString()
                         }
                     }
 
-                    lpBatch.add(
-                        lpContract.methods.getReserves().call.request((err, reserves) => {
-                            if (!err && reserves) {
-                                lpDetails.reserves = {
-                                    ...lpDetails.reserves,
-                                    reserve0: reserves['0'].toString(),
-                                    reserve1: reserves['1'].toString(),
-                                    blockTimestamp: reserves['2'].toString()
-                                }
-                            }
-                            completed++
-                            if (completed === 4) resolve(lpDetails)
-                        })
-                    )
-
-                    lpBatch.add(
-                        lpContract.methods.totalSupply().call.request((err, supply) => {
-                            if (!err && supply) {
-                                lpDetails.reserves.totalSupply = supply.toString()
-                            }
-                            completed++
-                            if (completed === 4) resolve(lpDetails)
-                        })
-                    )
-
-                    lpBatch.add(
-                        lpContract.methods.token0().call.request((err, token0) => {
-                            if (!err && token0) {
-                                lpDetails.token0 = token0.toLowerCase()
-                            }
-                            completed++
-                            if (completed === 4) resolve(lpDetails)
-                        })
-                    )
-
-                    lpBatch.add(
-                        lpContract.methods.token1().call.request((err, token1) => {
-                            if (!err && token1) {
-                                lpDetails.token1 = token1.toLowerCase()
-                            }
-                            completed++
-                            if (completed === 4) resolve(lpDetails)
-                        })
-                    )
+                    completed++
+                    if (completed === 5) resolve(lpDetails)
                 })
+            )
 
-                lpBatch.execute()
-                return await lpDetailsPromise
+            lpBatch.add(
+                lpContract.methods.totalSupply().call.request((err, supply) => {
+                    if (!err && supply) {
+                        lpDetails.reserves.totalSupply = supply.toString()
+                    }
 
-            } catch (error) {
-                console.warn(`Error fetching details for pool ${pool.lpAddress}:`, error)
-                return null
-            }
-        }))
+                    completed++
+                    if (completed === 5) resolve(lpDetails)
+                })
+            )
 
-        const results = await lpDetailsPromise
+            lpBatch.add(
+                lpContract.methods.token0().call.request((err, token0) => {
+                    if (!err && token0) {
+                        lpDetails.token0 = token0.toLowerCase()
+                    }
+
+                    completed++
+                    if (completed === 5) resolve(lpDetails)
+                })
+            )
+
+            lpBatch.add(
+                lpContract.methods.token1().call.request((err, token1) => {
+                    if (!err && token1) {
+                        lpDetails.token1 = token1.toLowerCase()
+                    }
+
+                    completed++
+                    if (completed === 5) resolve(lpDetails)
+                })
+            )
+
+            lpBatch.add(
+                lpContract.methods.balanceOf(poolsAddress).call.request((err, balance) => {
+                    if (!err && balance) {
+                        lpDetails.totalStaked = balance.toString()
+                    }
+
+                    completed++
+                    if (completed === 5) resolve(lpDetails)
+                })
+            )
+
+            lpBatch.execute()
+        })
+
+        return await lpDetailsPromise
+
+    } catch (error) {
+        console.warn(`Error fetching details for pool ${pool.lpAddress}:`, error)
+        return null
+    }
+}))
+
+const results = await lpDetailsPromise
         
         // Filter out incomplete results
         return results.filter(pool => 

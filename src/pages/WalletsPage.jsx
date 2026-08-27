@@ -6,7 +6,7 @@ import { hiddenWalletsAtom, hideHexMinersAtom, hideZeroValueAtom, liquiditySearc
 import { useAtom } from "jotai"
 import { useAppContext } from "../shared/AppContext"
 import Tooltip from "../shared/Tooltip"
-import React, { memo, useMemo, useEffect, useRef, useState } from "react"
+import React, { memo, useMemo, useEffect, useState } from "react"
 import SingleTokenButton from "../components/PricePage/SingleTokenButton"
 import LoadingWave from "../components/LoadingWave"
 import PriceJumbo from "../components/PricePage/PriceJumbo"
@@ -220,6 +220,13 @@ function WalletsPage ({
     const hexPrice = (prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']?.priceUsd ?? 0)
     const stakesUsdValue = (stakeStats?.totalFinalHex ?? 0) * hexPrice
     const incPriceUsd = Number(prices?.['0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d']?.priceUsd ?? 0)
+    const incPerDay = Object.values(farm ?? {}).reduce(
+        (total, farmPosition) =>
+            total + Number(farmPosition?.incPerDay ?? 0),
+        0
+    )
+
+    const incUsdPerDay = incPerDay * incPriceUsd
 
     const walletAddresses = Object.keys(data?.wallets ?? {})
         .map(address => address.toLowerCase())
@@ -465,9 +472,6 @@ function WalletsPage ({
         Farms: farmData?.loading,
         'Liquidity Pools': lpData?.loading
     }
-    const [incPerDay, setIncPerDay] = useState(() => {
-    return Number(localStorage.getItem('incPerDay') ?? 0)
-    })
 
     useEffect(() => {
         const fetchPulseMetrics = async () => {
@@ -532,48 +536,12 @@ function WalletsPage ({
         fetchPulseMetrics()
     }, [selectedTimeframe])
 
-    const incUsdPerDay = incPerDay * incPriceUsd
-    const prevIncRef = useRef(
-    Number(localStorage.getItem('prevInc') ?? null)
-    )
+const incRewards =
+    addressFarmRewards?.normalized &&
+    addressFarmRewards?.normalized > 0.01
 
-    const prevTimeRef = useRef(
-    Number(localStorage.getItem('prevTime') ?? null)
-    )
-
-    useEffect(() => {
-    if (!addressFarmRewards?.raw) return
-
-  const currentInc = Number(addressFarmRewards.normalized ?? 0)
-  const now = Date.now()
-
-  if (prevIncRef.current !== null && prevTimeRef.current !== null) {
-  const deltaInc = currentInc - prevIncRef.current
-  const deltaTime = (now - prevTimeRef.current) / 1000
-
-  if (deltaTime >= 300 && deltaInc > 0) {
-    const perSecond = deltaInc / deltaTime
-    const perDay = perSecond * 86400
-
-    setIncPerDay(prev => {
-      const newValue = prev === 0 ? perDay : (prev * 0.8 + perDay * 0.2)
-  localStorage.setItem('incPerDay', Number(newValue.toFixed(6)))
-  return newValue
-})
-
-    prevIncRef.current = currentInc
-    prevTimeRef.current = now
-    localStorage.setItem('prevInc', currentInc)
-    localStorage.setItem('prevTime', now)
-  }
-} else {
-  prevIncRef.current = currentInc
-  prevTimeRef.current = now
-  localStorage.setItem('prevInc', currentInc)
-  localStorage.setItem('prevTime', now)
-}
-}, [addressFarmRewards?.raw])
-const incRewards = addressFarmRewards?.normalized && addressFarmRewards?.normalized > 0.01
+const hasIncFarmActivity =
+    Boolean(incRewards) || incPerDay > 0
 const hasHexStakes = hexData?.combinedStakes.length > 0
 
     return <Wrapper>
@@ -698,23 +666,30 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                     <div style={{ position: 'relative', marginTop: 50, minHeight: 5 }}>
                         <div style={{ position: 'absolute', left: 0, top: -35, width: '100%', letterSpacing: 0.5 }}>
                             Liquidity Pools • {farmData?.loading === true || lpData?.loading === true ? 'Loading' : <span style={{ letterSpacing: 1 }}>$ { addCommasToNumber( parseFloat(parseFloat(addressFarms ?? 0 ) + parseFloat(addressLps ?? 0)).toFixed(2) ) }</span>}
-                            {farmData?.loading === true || lpData?.loading === true ? <div style={{ position: 'absolute', right: incRewards ? 50: -40, top: -5}}>
+                            {farmData?.loading === true || lpData?.loading === true ? <div style={{ position: 'absolute', right: hasIncFarmActivity ? 50: -40, top: -5}}>
                                 <Tooltip content="Retrieving PulseX Farm Data">
                                     <LoadingWave speed={100} numDots={8}/>
                                 </Tooltip>
                             </div> : ''}
                             <div style={{ position: 'absolute', right: 0, bottom: 0, fontSize: 15 }} className="mute">
-                                {incRewards ? <div>
-                                    <Tooltip content="PulseX Farm Rewards">
-                                        {addressFarmRewards?.normalized < 100_000 
-                                            ? addCommasToNumber(parseFloat(addressFarmRewards?.normalized).toFixed(3))
-                                            : fUnit( parseFloat(addressFarmRewards?.normalized), 3)
-                                        } <Icon icon={icons_list.farm} size={15}/>
-                                    </Tooltip>
+                                {hasIncFarmActivity ? <div>
+                                    {incRewards && (
+                                        <Tooltip content="PulseX Farm Rewards">
+                                            {addressFarmRewards?.normalized < 100_000 
+                                                ? addCommasToNumber(parseFloat(addressFarmRewards?.normalized).toFixed(3))
+                                                : fUnit(parseFloat(addressFarmRewards?.normalized), 3)
+                                            } <Icon icon={icons_list.farm} size={15}/>
+                                        </Tooltip>
+                                    )}
+
                                     <div style={{ fontSize: 12, opacity: 0.8 }}>
-                                            ~ {Number.isFinite(incPerDay) ? incPerDay.toFixed(2) : '0.00'} INC/day
-                                            {' '}
-                                            ($ {Number.isFinite(incUsdPerDay) ? addCommasToNumber(incUsdPerDay.toFixed(2)) : '0.00'}/day)
+                                        ~ {Number.isFinite(incPerDay)
+                                            ? addCommasToNumber(incPerDay.toFixed(2))
+                                            : '0.00'} INC/day
+                                        {' '}
+                                        ($ {Number.isFinite(incUsdPerDay)
+                                            ? addCommasToNumber(incUsdPerDay.toFixed(2))
+                                            : '0.00'}/day)
                                     </div>
                                 </div> : ''}
                             <div/>

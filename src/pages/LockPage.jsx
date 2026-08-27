@@ -7,7 +7,7 @@ import LoadingWave from "../components/LoadingWave"
 import { Input } from "../components/Input"
 import { hashString } from "../lib/crypto"
 import { initData, isKeyCorrect } from "../shared/AppContext"
-import { defaultSettings } from "../config/settings"
+import { defaultSettings, migrateSettings } from "../config/settings"
 
 const LockWrapper = styled.div`
     color: white;
@@ -59,7 +59,22 @@ export default function LockPage () {
     if (response) {
         try {
             const isUnencrypted = JSON.parse(response ?? '{}')
-            setSettings(isUnencrypted?.settings ?? defaultSettings)
+            const migratedSettings = migrateSettings(isUnencrypted?.settings)
+
+            setSettings(migratedSettings)
+
+            if (isUnencrypted?.settings) {
+                const migratedConfig = {
+                    ...isUnencrypted,
+                    settings: migratedSettings
+                }
+
+                await window.electron.saveFile(
+                    'config.json',
+                    JSON.stringify(migratedConfig)
+                )
+            }
+
             setKey('')
             setIsNewUser(false)
         } catch {

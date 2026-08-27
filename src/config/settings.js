@@ -1,7 +1,8 @@
 export const defaultSettings = {
     rpcs: {
         mainnet: [
-            'https://rpc-pulsechain.g4mm4.io'
+            'https://rpc.pulsechain.com',
+            'https://pulsechain-rpc.publicnode.com',
         ],
 
         ethereum: [
@@ -9,8 +10,10 @@ export const defaultSettings = {
         ],
 
         testnet: [
-            'https://rpc-testnet-pulsechain.g4mm4.io'
+            'https://rpc.v4.testnet.pulsechain.com',
+            'https://pulsechain-testnet-rpc.publicnode.com'
         ]
+
     },
 
     scan: {
@@ -31,6 +34,42 @@ export const defaultSettings = {
         scanEnabled: false,
         tokenImagesEnabled: false,
         dappImagesEnabled: false
+    }
+}
+
+export const migrateSettings = (settings) => {
+    if (!settings) return defaultSettings
+
+    const obsoleteMainnetRpcs = [
+        'https://rpc-pulsechain.g4mm4.io'
+    ]
+
+    const savedMainnetRpcs = settings?.rpcs?.mainnet ?? []
+
+    const hasObsoleteRpc = savedMainnetRpcs.some(
+        rpc => obsoleteMainnetRpcs.includes(rpc)
+    )
+
+    // If the user doesn't have an obsolete RPC, leave their setup alone.
+    if (!hasObsoleteRpc) {
+        return settings
+    }
+
+    const customMainnetRpcs = savedMainnetRpcs.filter(
+        rpc =>
+            !obsoleteMainnetRpcs.includes(rpc) &&
+            !defaultSettings.rpcs.mainnet.includes(rpc)
+    )
+
+    return {
+        ...settings,
+        rpcs: {
+            ...settings.rpcs,
+            mainnet: [
+                ...defaultSettings.rpcs.mainnet,
+                ...customMainnetRpcs
+            ]
+        }
     }
 }
 

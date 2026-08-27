@@ -1,3 +1,4 @@
+//useFarms.jsx
 import { useState, useEffect, useRef } from 'react'
 import { useAtom } from 'jotai'
 import { appSettingsAtom } from '../store'
@@ -100,6 +101,39 @@ useEffect(() => {
                 const walletBalances = arrayToUse.map((farm, poolIndex) => {
                     const poolInfo = pools[poolIndex]
                     const stakedTokensBigInt = BigInt(farm.stakedTokensRaw)
+                    const totalStakedBigInt = BigInt(poolInfo?.totalStaked ?? 0)
+                    const incPerSecondBigInt = BigInt(poolInfo?.incPerSecond ?? 0)
+                    const allocPointsBigInt = BigInt(poolInfo?.allocPoints ?? 0)
+                    const totalAllocPointBigInt = BigInt(poolInfo?.totalAllocPoint ?? 0)
+
+                    let incPerDay = 0
+
+                        if (
+                            stakedTokensBigInt > 0n &&
+                            totalStakedBigInt > 0n &&
+                            incPerSecondBigInt > 0n &&
+                            allocPointsBigInt > 0n &&
+                            totalAllocPointBigInt > 0n
+                        ) {
+                            const userIncPerDayRaw =
+                                (
+                                    incPerSecondBigInt *
+                                    allocPointsBigInt *
+                                    stakedTokensBigInt *
+                                    86400n
+                                ) /
+                                (
+                                    totalAllocPointBigInt *
+                                    totalStakedBigInt
+                                )
+
+                            incPerDay =
+                                Number(
+                                    (userIncPerDayRaw * 1_000_000n) /
+                                    1_000_000_000_000_000_000n
+                                ) / 1_000_000
+                        }
+                        
                     const totalSupplyBigInt = BigInt(poolInfo.reserves.totalSupply) / BigInt(10**18)
                     
                     // Calculate user's share of the pool
@@ -143,6 +177,7 @@ useEffect(() => {
                         token0Amount: token0AmountRaw.toString(),
                         token1Amount: token1AmountRaw.toString(),
                         userShare: userShare.toString(),
+                        incPerDay,
                         token0: {
                             raw: token0AmountRaw,
                             normalized: token0AmountNormalized,
@@ -185,6 +220,7 @@ useEffect(() => {
                             token1Address: farm.token1Address,
                             pendingInc: "0",
                             stakedTokens: "0",
+                            incPerDay: 0,
                             rewardDebt: "0",
                             userShare: "0",
                             token0Amount: "0",
@@ -213,6 +249,7 @@ useEffect(() => {
                     acc[lpAddress].userShare = (BigInt(acc[lpAddress].userShare) + BigInt(farm.userShare)).toString()
                     acc[lpAddress].token0Amount = (BigInt(acc[lpAddress].token0Amount) + BigInt(farm.token0Amount)).toString()
                     acc[lpAddress].token1Amount = (BigInt(acc[lpAddress].token1Amount) + BigInt(farm.token1Amount)).toString()
+                    acc[lpAddress].incPerDay = Number(acc[lpAddress].incPerDay ?? 0) + Number(farm.incPerDay ?? 0)
                     acc[lpAddress].token0 = {
                         raw: (BigInt(acc[lpAddress].token0Amount) + BigInt(farm.token0Amount)).toString(),
                         normalized: Number(acc[lpAddress]?.token0?.normalized ?? 0) + Number(farm?.token0?.normalized ?? 0),

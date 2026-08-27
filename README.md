@@ -63,6 +63,31 @@ Analyze purchases across multiple wallets and both supported blockchains using a
 </tr>
 </table>
 
+## 🚀 v2.2.1 — RPC Reliability & Farm Reward Accuracy
+
+This patch improves startup reliability and fixes INC/day farm reward estimates.
+
+### 🔧 Reliability
+
+- Replaced the unavailable PulseChain RPC endpoint
+- Added automatic migration for existing installs still using the obsolete RPC
+- Preserved user-configured custom RPC endpoints during migration
+- Improved startup behavior when loading saved RPC settings
+
+### 🌾 Farm Rewards
+
+- Fixed inaccurate INC/day estimates
+- INC/day is now calculated directly from on-chain farm emissions, allocation points, and the user's share of staked LP
+- Improved INC/day behavior after claiming pending farm rewards
+- Removed reliance on short-term reward extrapolation and cached estimates
+
+### 🐛 Fixes
+
+- Fixed an issue that could leave the dashboard stuck on **Retrieving Latest Prices**
+- Fixed INC/day values becoming wildly inaccurate after refreshes or delayed farm updates
+
+---
+
 ## 🚀 v2.2.0 — Lifetime HEX DCA & Multi-Chain Purchase Tracking
 
 This release introduces one of the biggest upgrades to PulseChain Dashboard yet: **lifetime HEX dollar-cost averaging (DCA)** with historical purchase reconstruction across both Ethereum and PulseChain.
