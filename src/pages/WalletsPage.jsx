@@ -24,8 +24,8 @@ import HexComponent from "../components/HexComponent"
 
 const Wrapper = styled.div`
     color: white;
-    min-width: 650px;
-    max-width: 650px;
+    min-width: 825px;
+    max-width: 825px;
     justify-self: center;
 
     button {
@@ -58,7 +58,7 @@ const Wrapper = styled.div`
     //     }
     // }
 
-    @media (max-width: 650px) {
+    @media (max-width: 825px) {
         min-width: calc( 100dvw - 40px );
         max-width: calc( 100dvw - 40px );
         // min-width: calc( 100dvw );
@@ -126,7 +126,8 @@ function WalletsPage ({
     lpData,
     historyData,
     hexData,
-    hexDcaData
+    hexDcaData,
+    tokenPnlData
 }) {
     const { pricePairs, prices, priceLastUpdated } = priceData
     const { balances, combinedBalances } = balanceData
@@ -557,13 +558,16 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                     bestStable={priceData?.bestStable}
                 />
 
-                {!loading && !allWalletsHidden && (
+                {!allWalletsHidden && (
                     <div style={{
                         textAlign: 'center',
-                        marginTop: -48,
-                        marginBottom: 28,
+                        marginTop: -32,
+                        marginBottom: 38,
                         position: 'relative',
                         zIndex: 5,
+                        minHeight: 22,
+                        lineHeight: '22px',
+                        whiteSpace: 'nowrap',
                         fontSize: 18,
                         fontWeight: 700,
                         color: walletChange.usd > 0
@@ -621,20 +625,99 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                 />
             </div>
             {hasHexStakes ? <div>
-                <StakeComponent visibleWallets={visibleWallets} disabled={hideHexMiners} hexData={hexData} hexDcaData={hexDcaData} hexPrice={prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} hiddenWallets={hiddenWallets}/>
+                <StakeComponent visibleWallets={visibleWallets} disabled={hideHexMiners} hexData={hexData} hexDcaData={hexDcaData} hexTokenPnl={tokenPnlData?.positions?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} hexPrice={prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} hiddenWallets={hiddenWallets}/>
 
                 {!hideHexMiners && <HexComponent hexData={hexData} visibleWallets={visibleWallets} hexPrice={prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} aliases={data?.aliases ?? {}}/>}
             </div> : ''}
             <div>
-                <div style={{ position: 'relative', height: 16, width: '100%', marginTop: 40 }}>
-                    <div style={{ position: 'absolute', left: 0, bottom: 10, letterSpacing: 0.5 }} >
+                <div style={{ position: 'relative', minHeight: tokenPnlData?.loading ? 76 : 28, width: '100%', marginTop: 40 }}>
+                    <div style={{ position: 'absolute', left: 0, top: 0, letterSpacing: 0.5 }} >
                         Token Watchlist • <span style={{ letterSpacing: 1 }}> $ { addCommasToNumber(parseFloat(addressBalances ?? 0 ).toFixed(2)) }</span>
+                    </div>
+                    <div
+                        className="desktop-only mute"
+                        style={{
+                            position: 'absolute',
+                            right: 155,
+                            top: 0,
+                            width: 125,
+                            textAlign: 'right',
+                            fontSize: 12,
+                            letterSpacing: 0.5
+                        }}
+                    >
+                        Value
+                    </div>
+                    <div
+                        className="desktop-only mute"
+                        style={{
+                            position: 'absolute',
+                            right: 20,
+                            top: 0,
+                            width: 125,
+                            textAlign: 'right',
+                            fontSize: 12,
+                            letterSpacing: 0.5
+                        }}
+                    >
+                        P&amp;L
                     </div>
                     {balanceData?.loading === true? <div style={{ position: 'absolute', right: -40, top: -20}}>
                         <Tooltip content="Retrieving Updated Balances">
                             <LoadingWave speed={100} numDots={8}/>
                         </Tooltip>
                     </div> : ''}
+                    {tokenPnlData?.loading === true && (() => {
+                        const total = Math.max(0, Number(tokenPnlData?.progress?.total ?? 0))
+                        const current = Math.max(0, Math.min(Number(tokenPnlData?.progress?.current ?? 0), total || 0))
+                        const percent = total > 0 ? Math.max(2, Math.min(100, (current / total) * 100)) : 8
+                        const activeLabels = (tokenPnlData?.activeTokens ?? []).map(address => {
+                            const key = address?.toLowerCase()
+                            return prices?.[key]?.symbol ?? watchlist?.[key]?.token?.symbol ?? key?.slice(0, 8)
+                        })
+                        const statusText = activeLabels.length > 0
+                            ? `Calculating P&L: ${activeLabels.join(' + ')}${total > 0 ? ` • ${current}/${total} complete` : ''}`
+                            : tokenPnlData?.progress?.stage === 'transfers'
+                                ? 'Preparing wallet history for P&L…'
+                                : 'Updating cached P&L…'
+                        return (
+                            <div style={{ position: 'absolute', left: 0, top: 28, width: '100%' }}>
+                                <div style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: 12,
+                                    minHeight: 24,
+                                    padding: '4px 8px',
+                                    border: '1px solid rgba(255,255,255,0.10)',
+                                    borderRadius: 6,
+                                    background: 'rgba(255,255,255,0.035)',
+                                    fontSize: 12,
+                                    letterSpacing: 0.35
+                                }}>
+                                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{statusText}</span>
+                                    <span className="mute" style={{ whiteSpace: 'nowrap' }}>{total > 0 ? `${Math.round((current / total) * 100)}%` : 'Working…'}</span>
+                                </div>
+                                <div style={{
+                                    width: '100%',
+                                    height: 4,
+                                    marginTop: 5,
+                                    borderRadius: 99,
+                                    overflow: 'hidden',
+                                    background: 'rgba(255,255,255,0.08)'
+                                }}>
+                                    <div style={{
+                                        width: `${percent}%`,
+                                        height: '100%',
+                                        borderRadius: 99,
+                                        background: 'currentColor',
+                                        opacity: 0.8,
+                                        transition: 'width 180ms ease'
+                                    }}/>
+                                </div>
+                            </div>
+                        )
+                    })()}
                 </div>
     
                 <div>
@@ -657,7 +740,9 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                             pairId={pairId} 
                             prices={prices} 
                             getImage={getImage} 
-                            priceArray={priceArray} 
+                            priceArray={priceArray}
+                            tokenPnl={tokenPnlData?.positions?.[tokenAddress?.toLowerCase()]}
+                            tokenPnlLoading={tokenPnlData?.loading === true && (tokenPnlData?.activeTokens ?? []).includes(tokenAddress?.toLowerCase())}
                         />
                     })}
                 </div>

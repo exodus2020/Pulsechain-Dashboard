@@ -189,6 +189,22 @@ const safeLocalStorageSet = (key, value) => {
 const DCA_RESULT_CACHE_VERSION = 6
 const DCA_RESULT_CACHE_MAX_AGE = 6 * 60 * 60 * 1000
 
+const DCA_WALLET_CACHE_VERSION = 1
+const getDcaWalletCacheKey = wallet => `hex_dca_wallet_v${DCA_WALLET_CACHE_VERSION}:${normalizeAddress(wallet)}`
+const readDcaWalletCache = wallet => {
+    try {
+        const raw = safeLocalStorageGet(getDcaWalletCacheKey(wallet))
+        if (!raw) return null
+        const parsed = JSON.parse(raw)
+        return Array.isArray(parsed?.purchases) ? parsed : null
+    } catch { return null }
+}
+const writeDcaWalletCache = (wallet, purchases, walletErrors = {}, transactionErrors = []) => {
+    const payload = { purchases, walletErrors, transactionErrors, cachedAt: Date.now() }
+    safeLocalStorageSet(getDcaWalletCacheKey(wallet), JSON.stringify(payload))
+    return payload
+}
+
 const getDcaResultCacheKey = ({
     network,
     walletKey
@@ -1176,39 +1192,54 @@ const resultCacheKey =
         walletKey
     })
 
-const cachedDcaResult =
-    readCachedDcaResult(resultCacheKey)
+// V33: warm from independent wallet caches. Visibility is handled later by
+// stats filtering, so adding or hiding an unrelated wallet never invalidates
+// another wallet's HEX purchase history.
+const cachedWallets = {}
+const staleWallets = []
 
-const cachedResultAge =
-    cachedDcaResult?.cachedAt
-        ? Date.now() - cachedDcaResult.cachedAt
-        : Infinity
+// Migrate the existing V6 combined cache into wallet-sized pieces once. This
+// preserves the expensive scan users already completed before V33.
+const legacyCombinedCache = readCachedDcaResult(resultCacheKey)
+if (legacyCombinedCache) {
+    for (const wallet of walletAddresses) {
+        if (readDcaWalletCache(wallet)) continue
+        const walletPurchases = (legacyCombinedCache.purchases ?? []).filter(p => normalizeAddress(p?.wallet) === normalizeAddress(wallet))
+        const walletErrorSubset = Object.fromEntries(Object.entries(legacyCombinedCache.walletErrors ?? {}).filter(([key]) => key.endsWith(`:${normalizeAddress(wallet)}`)))
+        const walletTxErrors = (legacyCombinedCache.transactionErrors ?? []).filter(e => normalizeAddress(e?.wallet) === normalizeAddress(wallet))
+        const migrated = {
+            purchases: walletPurchases, walletErrors: walletErrorSubset, transactionErrors: walletTxErrors,
+            cachedAt: Number(legacyCombinedCache.cachedAt ?? Date.now())
+        }
+        safeLocalStorageSet(getDcaWalletCacheKey(wallet), JSON.stringify(migrated))
+    }
+}
 
-if (cachedDcaResult) {
-    setPurchases(cachedDcaResult.purchases)
-    setWalletErrors(
-        cachedDcaResult.walletErrors ?? {}
-    )
-    setTransactionErrors(
-        cachedDcaResult.transactionErrors ?? []
-    )
-    setProgress({
-        current: cachedDcaResult.purchases.length,
-        total: cachedDcaResult.purchases.length,
-        stage: "complete"
-    })
+for (const wallet of walletAddresses) {
+    const cached = readDcaWalletCache(wallet)
+    const age = cached?.cachedAt ? Date.now() - cached.cachedAt : Infinity
+    if (cached) cachedWallets[wallet] = cached
+    if (!cached || age >= DCA_RESULT_CACHE_MAX_AGE) staleWallets.push(wallet)
+}
+
+const warmPurchases = Object.values(cachedWallets).flatMap(item => item?.purchases ?? [])
+const warmWalletErrors = Object.values(cachedWallets).reduce((acc, item) => ({ ...acc, ...(item?.walletErrors ?? {}) }), {})
+const warmTransactionErrors = Object.values(cachedWallets).flatMap(item => item?.transactionErrors ?? [])
+
+if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
+    setPurchases(warmPurchases)
+    setWalletErrors(warmWalletErrors)
+    setTransactionErrors(warmTransactionErrors)
+    setProgress({ current: warmPurchases.length, total: warmPurchases.length, stage: "complete" })
     setLoading(false)
 }
 
-if (
-    cachedDcaResult &&
-    cachedResultAge < DCA_RESULT_CACHE_MAX_AGE
-) {
+if (staleWallets.length === 0) {
     return
 }
-            setLoading(!cachedDcaResult)
+            setLoading(Object.keys(cachedWallets).length === 0)
 
-            if (!cachedDcaResult) {
+            if (Object.keys(cachedWallets).length === 0) {
                 setPurchases([])
                 setWalletErrors({})
                 setTransactionErrors([])
@@ -1240,7 +1271,7 @@ if (
         try {
             historyResult =
                 await batchFetchCompleteActivities(
-                    walletAddresses,
+                    staleWallets,
                     source.network,
                     settings,
                     {
@@ -1500,18 +1531,26 @@ if (
                 const finalWalletErrors =
                     combinedWalletErrors
 
-                writeCachedDcaResult(
-                    resultCacheKey,
-                    {
-                        purchases: pricedPurchases,
-                        walletErrors: finalWalletErrors,
-                        transactionErrors: detailErrors
-                    }
-                )
+                // Persist each refreshed wallet independently, then combine with
+                // already-cached wallets. This is the DCA equivalent of the token
+                // P&L per-wallet ledger cache.
+                for (const wallet of staleWallets) {
+                    const walletPurchases = pricedPurchases.filter(p => normalizeAddress(p?.wallet) === normalizeAddress(wallet))
+                    const walletErrorSubset = Object.fromEntries(Object.entries(finalWalletErrors).filter(([key]) => key.endsWith(`:${normalizeAddress(wallet)}`)))
+                    const walletTxErrors = detailErrors.filter(e => normalizeAddress(e?.wallet) === normalizeAddress(wallet))
+                    writeDcaWalletCache(wallet, walletPurchases, walletErrorSubset, walletTxErrors)
+                    cachedWallets[wallet] = { purchases: walletPurchases, walletErrors: walletErrorSubset, transactionErrors: walletTxErrors, cachedAt: Date.now() }
+                }
 
-                setPurchases(pricedPurchases)
-                setWalletErrors(finalWalletErrors)
-                setTransactionErrors(detailErrors)
+                const combinedPurchases = Object.values(cachedWallets).flatMap(item => item?.purchases ?? []).sort((a, b) => (toUnixSeconds(a?.timestamp) ?? 0) - (toUnixSeconds(b?.timestamp) ?? 0))
+                const combinedErrors = Object.values(cachedWallets).reduce((acc, item) => ({ ...acc, ...(item?.walletErrors ?? {}) }), {})
+                const combinedTxErrors = Object.values(cachedWallets).flatMap(item => item?.transactionErrors ?? [])
+
+                writeCachedDcaResult(resultCacheKey, { purchases: combinedPurchases, walletErrors: combinedErrors, transactionErrors: combinedTxErrors })
+
+                setPurchases(combinedPurchases)
+                setWalletErrors(combinedErrors)
+                setTransactionErrors(combinedTxErrors)
             } catch (error) {
                 if (cancelled) {
                     return

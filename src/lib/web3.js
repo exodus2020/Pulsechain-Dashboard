@@ -139,7 +139,10 @@ export const fetchCompleteAddressTransactions = async (
         maxPages = 250,
         delayBetweenPages = 150,
         retryAttempts = 4,
-        onProgress = null
+        onProgress = null,
+        onPage = null,
+        startBlock = 0,
+        endBlock = 99999999
     } = options
 
     if (!address) {
@@ -202,6 +205,18 @@ export const fetchCompleteAddressTransactions = async (
             Array.isArray(pageData?.items)
                 ? pageData.items
                 : []
+
+        if (typeof onPage === "function") {
+            onPage({
+                address: normalizedAddress,
+                page,
+                transfers: pageTransfers,
+                collected: transfers.length,
+                network,
+                startBlock: Math.max(0, Number(startBlock) || 0),
+                endBlock: Math.max(0, Number(endBlock) || 99999999)
+            })
+        }
 
         if (typeof onProgress === "function") {
             onProgress({
@@ -278,6 +293,187 @@ export const fetchCompleteAddressTransactions = async (
     return transactions
 }
 
+
+
+/**
+ * Fetch every ERC-20/token transfer involving one wallet from Blockscout.
+ * This endpoint is much better suited to portfolio cost-basis reconstruction
+ * than filtering the general transaction feed because it includes transfers
+ * created inside routers, bridges and multicalls.
+ */
+export const fetchCompleteAddressTokenTransfers = async (
+    address,
+    network = "mainnet",
+    settings = defaultSettings,
+    options = {}
+) => {
+    const {
+        maxPages = 20,
+        pageSize = 1000,
+        delayBetweenPages = 150,
+        retryAttempts = 4,
+        onProgress = null,
+        onPage = null,
+        startBlock = 0,
+        endBlock = 99999999
+    } = options
+
+    if (!address) return []
+
+    const normalizedAddress = address.toLowerCase().trim()
+    if (!isValidWalletAddress(normalizedAddress)) {
+        throw new Error(`Cannot fetch token transfers for invalid address: ${address}`)
+    }
+
+    // PulseChain's documented Etherscan-compatible endpoint is substantially
+    // more reliable for large wallet histories than the Blockscout v2
+    // /addresses/:address/token-transfers route, which can time out while the
+    // server assembles a fully paginated response.
+    const configuredScan = settings?.scan?.[network]
+    const scanApi = Array.isArray(configuredScan) ? configuredScan[0] : configuredScan
+    if (!scanApi) {
+        throw new Error(`No explorer API is configured for network: ${network}`)
+    }
+
+    const transfers = []
+    const seen = new Set()
+    let page = 1
+
+    while (page <= maxPages) {
+        const pageData = await fetchExplorerPageWithRetry(
+            scanApi,
+            {
+                module: "account",
+                action: "tokentx",
+                address: normalizedAddress,
+                sort: "asc",
+                page,
+                offset: pageSize,
+                startblock: Math.max(0, Number(startBlock) || 0),
+                endblock: Math.max(0, Number(endBlock) || 99999999)
+            },
+            retryAttempts
+        )
+
+        const rawItems = Array.isArray(pageData?.result) ? pageData.result : []
+        // Blockscout uses status=0/message="No token transfers found" for an
+        // empty page; that is a normal end-of-history condition.
+        if (rawItems.length === 0) break
+
+        const pageTransfers = []
+        for (const item of rawItems) {
+            const hash = String(item?.hash ?? "").toLowerCase()
+            const tokenAddress = String(item?.contractAddress ?? "").toLowerCase()
+            const from = String(item?.from ?? "").toLowerCase()
+            const to = String(item?.to ?? "").toLowerCase()
+            const rawValue = String(item?.value ?? "0")
+            const logIndex = String(item?.logIndex ?? item?.transactionIndex ?? "")
+            if (!hash || !tokenAddress) continue
+            const key = `${hash}:${logIndex}:${tokenAddress}:${from}:${to}:${rawValue}`
+            if (seen.has(key)) continue
+            seen.add(key)
+
+            const normalizedTransfer = {
+                transaction_hash: hash,
+                log_index: logIndex,
+                block_number: Number(item?.blockNumber ?? 0),
+                timestamp: Number(item?.timeStamp ?? 0),
+                from,
+                to,
+                value: rawValue,
+                method: String(item?.functionName ?? ""),
+                token: {
+                    address_hash: tokenAddress,
+                    symbol: String(item?.tokenSymbol ?? ""),
+                    name: String(item?.tokenName ?? ""),
+                    decimals: Number(item?.tokenDecimal ?? 18)
+                },
+                total: {
+                    value: rawValue,
+                    decimals: Number(item?.tokenDecimal ?? 18)
+                },
+                originating_address: normalizedAddress,
+                pnl_transfer_source: "legacy-tokentx"
+            }
+            transfers.push(normalizedTransfer)
+            pageTransfers.push(normalizedTransfer)
+        }
+
+        if (typeof onPage === "function") {
+            onPage({
+                address: normalizedAddress,
+                page,
+                transfers: pageTransfers,
+                collected: transfers.length,
+                network,
+                startBlock: Math.max(0, Number(startBlock) || 0),
+                endBlock: Math.max(0, Number(endBlock) || 99999999)
+            })
+        }
+
+        if (typeof onProgress === "function") {
+            onProgress({
+                address: normalizedAddress,
+                page,
+                collected: transfers.length,
+                network,
+                source: "legacy-tokentx"
+            })
+        }
+
+        // Do NOT stop just because the explorer returned fewer rows than the
+        // requested offset. PulseChain's Etherscan-compatible endpoint can cap
+        // a response at ~250 rows even when a larger offset was requested. V17
+        // therefore mistook the first capped page for the end of history and
+        // only cached ~250 PulseChain transfers. Keep paging until the explorer
+        // explicitly returns an empty page.
+        //
+        // If a broken endpoint ignores `page` and repeats the same rows, abort
+        // rather than looping forever or marking a truncated history complete.
+        if (page > 1 && pageTransfers.length === 0) {
+            throw new Error(`Token-transfer pagination did not advance for ${normalizedAddress} on ${network}`)
+        }
+        page += 1
+        if (delayBetweenPages > 0) await waitForExplorerRetry(delayBetweenPages)
+    }
+
+    if (page > maxPages) {
+        throw new Error(`Token-transfer history exceeded the ${maxPages * pageSize}-transfer safety limit for ${normalizedAddress}`)
+    }
+
+    return transfers
+}
+
+export const batchFetchCompleteTokenTransfers = async (
+    addresses = [],
+    network = "mainnet",
+    settings = defaultSettings,
+    options = {}
+) => {
+    const uniqueAddresses = [...new Set(
+        addresses.filter(Boolean).map(address => address.toLowerCase().trim())
+    )]
+    const transfers = {}
+    const errors = {}
+
+    for (const address of uniqueAddresses) {
+        try {
+            transfers[address] = await fetchCompleteAddressTokenTransfers(
+                address,
+                network,
+                settings,
+                options
+            )
+        } catch (error) {
+            transfers[address] = []
+            errors[address] = error?.message ?? "Unable to fetch complete token-transfer history"
+            console.error("TOKEN P&L TRANSFER HISTORY FAILED:", address, errors[address])
+        }
+        await waitForExplorerRetry(250)
+    }
+
+    return { transfers, errors }
+}
 
 /**
  * Fetch complete transaction histories for multiple wallets.

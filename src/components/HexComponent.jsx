@@ -19,8 +19,8 @@ import Input from "./Input"
 const Wrapper = styled.div`
     position: relative;
     color: white;
-    min-width: 650px;
-    max-width: 650px;
+    min-width: 825px;
+    max-width: 825px;
     justify-self: center;
     font-family: 'Oswald', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     padding: 30px 0;
@@ -36,7 +36,7 @@ const Wrapper = styled.div`
         grid-template-columns: 1fr 1fr;
         gap: 10px;
 
-        @media (max-width: 650px) {
+        @media (max-width: 825px) {
             display: grid;
             grid-template-columns: 1fr;
             max-width: calc( 100dvw - 40px );
@@ -60,7 +60,7 @@ const Wrapper = styled.div`
             top: 0;
         }
 
-        @media (max-width: 650px) {
+        @media (max-width: 825px) {
             // display: flex;
             // flex-direction: column;
             // align-items: flex-end;
@@ -74,8 +74,9 @@ const Wrapper = styled.div`
         }
     }
 
-    @media (max-width: 650px) {
-        min-width: 100dvw;
+    @media (max-width: 825px) {
+        min-width: calc(100dvw - 40px);
+        max-width: calc(100dvw - 40px);
     }
 `
 

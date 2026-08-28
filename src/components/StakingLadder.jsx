@@ -202,7 +202,7 @@ function StakingLadderChart({ stakes }) {
         <ChartContainer>
             <h3 style={{ margin: '0 0 20px 0', textAlign: 'center' }}>Staking Ladder</h3>
                         <BarChart
-                            width={windowWidth <= 650 ? Math.max(300, windowWidth - 100) : 560}
+                            width={windowWidth <= 650 ? Math.max(300, windowWidth - 100) : 700}
                             height={200}
                             data={chartData}
                             margin={{ top: 20, right: 30, left: 20, bottom: 30 }}

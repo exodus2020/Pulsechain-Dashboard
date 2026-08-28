@@ -28,7 +28,8 @@ const Wrapper = styled.div`
 
     .jumbo-price {
         font-family: 'Oswald', sans-serif;
-        font-size: 50px;
+        font-size: 75px;
+        line-height: 1.08;
         display: inline-block;
         font-weight: 600;
     }

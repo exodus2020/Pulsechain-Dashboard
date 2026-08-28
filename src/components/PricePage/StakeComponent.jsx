@@ -11,8 +11,8 @@ import { shortenString } from "../../lib/string"
 
 const Wrapper = styled.div`
     color: white;
-    min-width: 650px;
-    max-width: 650px;
+    min-width: 825px;
+    max-width: 825px;
     justify-self: center;
     font-family: 'Oswald', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
@@ -24,13 +24,12 @@ const Wrapper = styled.div`
     
     .hex-grid {
         display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         align-items: stretch;
         gap: 8px;
     }
 
     .hex-grid > * {
-        display: block;
         width: 100%;
         height: 100%;
         min-width: 0;
@@ -41,7 +40,7 @@ const Wrapper = styled.div`
         letter-spacing: 0.5px;
     }
 
-    @media (max-width: 650px) {
+    @media (max-width: 825px) {
         min-width: calc( 100dvw - 40px );
         max-width: calc( 100dvw - 40px );
 
@@ -65,9 +64,13 @@ const Row = styled.div`
     box-sizing: border-box;
     text-align: center;
     box-shadow: 0 1px 4px rgba(255, 255, 255, 0.1);
-    padding: 30px 8px;
+    padding: 12px 8px;
     border-radius: 10px;
     position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     .icon-mute {
         svg path {
             fill: rgb(120,120,120) !important;
@@ -75,7 +78,7 @@ const Row = styled.div`
     }
 `
 
-export function StakeComponent({hexData, hexDcaData, hexPrice, hiddenWallets, disabled, visibleWallets}) {
+export function StakeComponent({hexData, hexDcaData, hexTokenPnl, hexPrice, hiddenWallets, disabled, visibleWallets}) {
 
     const formatTShares = (tShares) => hexData.stats.totalTShares < 100 ? tShares.toFixed(3) : `${fUnit(tShares, 2)}`
     const formatLength = (length) => length < 364 ? `${length}d` : `${parseFloat(length / 365).toFixed(2)}y`
@@ -172,6 +175,38 @@ export function StakeComponent({hexData, hexDcaData, hexPrice, hiddenWallets, di
         Number.isFinite(dcaPrice) &&
         dcaPrice > 0
 
+    // V33: if the direct HEX-purchase scanner cannot classify an old/large
+    // wallet, prefer the cost basis that was actually carried into active HEX
+    // stakes. Falling back to the LIQUID HEX average alone made large staking
+    // wallets show absurdly tiny DCA prices and also poisoned the all-wallet
+    // aggregate. The token P&L ledger now preserves stake-start basis separately.
+    const reconstructedStakeUnits = Number(hexTokenPnl?.stakedUnits ?? 0)
+    const reconstructedStakeBasis = Number(hexTokenPnl?.stakedCostBasisUsd ?? 0)
+    const reconstructedStakeEntry =
+        reconstructedStakeUnits > 0 && reconstructedStakeBasis > 0
+            ? reconstructedStakeBasis / reconstructedStakeUnits
+            : null
+    const reconstructedHexEntry = Number(hexTokenPnl?.averageEntry)
+    const fallbackHexEntry =
+        Number.isFinite(reconstructedStakeEntry) && reconstructedStakeEntry > 0
+            ? reconstructedStakeEntry
+            : (Number.isFinite(reconstructedHexEntry) && reconstructedHexEntry > 0
+                ? reconstructedHexEntry
+                : null)
+    const hasReconstructedHexEntry = Number.isFinite(fallbackHexEntry) && fallbackHexEntry > 0
+
+    // V34: the miner cards must use one basis source consistently. The per-wallet
+    // token ledger carries basis into active stakes and aggregates it by summing
+    // cost basis + principal units, which gives the correct amount-weighted DCA.
+    // Prefer that ledger whenever active stake basis is available; only fall back
+    // to the legacy purchase scanner when no reconstructed stake basis exists.
+    const usesReconstructedDca =
+        reconstructedStakeUnits > 0 && reconstructedStakeBasis > 0 && hasReconstructedHexEntry
+    const effectiveDcaPrice = usesReconstructedDca
+        ? reconstructedStakeEntry
+        : (hasDcaPrice ? dcaPrice : (hasReconstructedHexEntry ? fallbackHexEntry : null))
+    const hasEffectiveDcaPrice = Number.isFinite(effectiveDcaPrice) && effectiveDcaPrice > 0
+
     const dcaPurchaseCount =
         Number(hexDcaData?.stats?.purchaseCount ?? 0)
 
@@ -188,20 +223,23 @@ export function StakeComponent({hexData, hexDcaData, hexPrice, hiddenWallets, di
             hexDcaData?.stats?.pricedHexPurchased ?? 0
         )
 
-    const dcaCurrentValue =
-        dcaPricedHex * Number(hexUsd ?? 0)
+    const directDcaCurrentValue = dcaPricedHex * Number(hexUsd ?? 0)
+    const directDcaBasis = Number(hexDcaData?.stats?.totalUsdSpent ?? 0)
 
-    const dcaProfit =
-        dcaCurrentValue -
-        Number(hexDcaData?.stats?.totalUsdSpent ?? 0)
-
-    const dcaReturnPercent =
-        Number(hexDcaData?.stats?.totalUsdSpent ?? 0) > 0
-            ? (
-                dcaProfit /
-                Number(hexDcaData.stats.totalUsdSpent)
-            ) * 100
-            : null
+    // For reconstructed stake basis, P&L is the active principal's current
+    // value minus the cost basis carried into that principal. This keeps the
+    // miner P&L card aligned with the currently selected wallet(s).
+    const reconstructedStakeCurrentValue = reconstructedStakeUnits * Number(hexUsd ?? 0)
+    const dcaCurrentValue = usesReconstructedDca && reconstructedStakeUnits > 0
+        ? reconstructedStakeCurrentValue
+        : directDcaCurrentValue
+    const effectiveDcaBasis = usesReconstructedDca && reconstructedStakeBasis > 0
+        ? reconstructedStakeBasis
+        : directDcaBasis
+    const dcaProfit = dcaCurrentValue - effectiveDcaBasis
+    const dcaReturnPercent = effectiveDcaBasis > 0
+        ? (dcaProfit / effectiveDcaBasis) * 100
+        : null
 
     const dcaUnpricedCount =
         Number(
@@ -291,11 +329,20 @@ const formatSignedUsd = amount => {
         Math.abs(numericAmount).toFixed(2)
     )}`
 }
+
+const fitPnlFontSize = value => {
+    const length = String(value ?? "").length
+    if (length >= 18) return 14
+    if (length >= 16) return 15
+    if (length >= 14) return 17
+    if (length >= 12) return 19
+    return 23
+}
     const dcaDisplay =
         dcaLoading
             ? "Loading"
-            : hasDcaPrice
-                ? `$ ${dcaPrice.toFixed(6)}`
+            : hasEffectiveDcaPrice
+                ? `$ ${effectiveDcaPrice.toFixed(6)}`
                 : "$ N/A"
 
     const dcaTooltip = dcaLoading
@@ -304,7 +351,7 @@ const formatSignedUsd = amount => {
             Retrieving lifetime HEX purchase history
         </div>
     )
-    : hasDcaPrice
+    : hasEffectiveDcaPrice
         ? (
             <div
                 style={{
@@ -314,30 +361,15 @@ const formatSignedUsd = amount => {
                     boxSizing: "border-box"
                 }}
             >
-                <strong>Average Entry</strong>
+                <strong>{usesReconstructedDca ? "Estimated Average Entry" : "Average Entry"}</strong>
                 <br/>
-                $ {dcaPrice.toFixed(6)}
+                $ {effectiveDcaPrice.toFixed(6)}
 
                 <br/><br/>
 
                 <strong>Current Price</strong>
                 <br/>
                 $ {Number(hexUsd ?? 0).toFixed(6)}
-
-                {Number.isFinite(dcaReturnPercent) && (
-                    <>
-                        <br/><br/>
-
-                        <strong>Return at Current Price</strong>
-                        <br/>
-                        {dcaReturnPercent >= 0 ? "+" : ""}
-                        {dcaReturnPercent.toFixed(2)}%
-
-                        <br/>
-
-                        {formatSignedUsd(dcaProfit)}
-                    </>
-                )}
 
                 <br/><br/>
 
@@ -352,10 +384,7 @@ const formatSignedUsd = amount => {
                 <strong>Total Spent</strong>
                 <br/>
                 $ {addCommasToNumber(
-                    Number(
-                        hexDcaData?.stats
-                            ?.totalUsdSpent ?? 0
-                    ).toFixed(2)
+                    Number(effectiveDcaBasis ?? 0).toFixed(2)
                 )}
 
                 <br/><br/>
@@ -363,7 +392,9 @@ const formatSignedUsd = amount => {
                 <strong>HEX Purchased</strong>
                 <br/>
                 {addCommasToNumber(
-                    dcaTotalHex.toFixed(0)
+                    (usesReconstructedDca && reconstructedStakeUnits > 0
+                        ? reconstructedStakeUnits
+                        : dcaTotalHex).toFixed(0)
                 )}
 
                 <br/><br/>
@@ -649,26 +680,26 @@ const formatSignedUsd = amount => {
             </div>
             <div className="hex-grid">
                 <Row>
-                    <div style={{ fontSize: 20, position: 'absolute', top: 10, left: 15}}>Avg Length</div>
-                    <div style={{ paddingTop: 10, fontSize: 28 }}>
+                    <div style={{ fontSize: 20, textAlign: 'center', width: '100%' }}>Avg Length</div>
+                    <div style={{ marginTop: 6, fontSize: 28 }}>
                         {isNaN(stats?.averageStakeLength) ? '0' : formatLength(stats?.averageStakeLength ?? 0)}
                     </div>
                 </Row>
                 <Tooltip content={<div style={{ textAlign: 'center' }}>{addCommasToNumber(parseFloat(stats?.totalTShares ?? 0).toFixed(4))} T-Shares</div>}>
                     <Row>
-                        <div style={{ fontSize: 20, position: 'absolute', top: 10, left: 15}}>T-Shares</div>
-                        <div style={{ paddingTop: 10, fontSize: 28 }}>
+                        <div style={{ fontSize: 20, textAlign: 'center', width: '100%' }}>T-Shares</div>
+                        <div style={{ marginTop: 6, fontSize: 28 }}>
                             { formatTShares(stats?.totalTShares ?? 0) }
                         </div>
                     </Row>
                 </Tooltip>
                 <Tooltip content={<div style={{ textAlign: 'center' }}>$ {addCommasToNumber(parseFloat(stakedHexUsd ?? 0).toFixed(2))}<br/><br/>{addCommasToNumber(parseFloat(stakedHex ?? 0).toFixed(0))} HEX</div>}>
                     <Row>
-                        <div style={{ fontSize: 20, position: 'absolute', top: 10, left: 15}}>Principal</div>
-                        <div style={{ alignItems: 'center', fontSize: 28, paddingTop: 10, position: 'relative' }}>
+                        <div style={{ fontSize: 20, textAlign: 'center', width: '100%' }}>Principal</div>
+                        <div style={{ fontSize: 28, marginTop: 6, position: 'relative', textAlign: 'center' }}>
                             $ {fUnit( stakedHexUsd ?? 0, 1 )}
-                            <div style={{ position: 'absolute', bottom: -18, right: 5}} className="icon-mute">
-                                <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', verticalAlign: 'middle', paddingTop: 20, fontSize: 16}} className="mute">
+                            <div style={{ marginTop: 4, width: '100%' }} className="icon-mute">
+                                <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', verticalAlign: 'middle', paddingTop: 0, fontSize: 16}} className="mute">
                                     {fUnit( stakedHex ?? 0, 3 )} <Icon icon={icons_list.hex} size={18} style={{marginLeft: 5}} />
                                 </div>
                             </div>
@@ -677,12 +708,12 @@ const formatSignedUsd = amount => {
                 </Tooltip>
                                 <Tooltip content={<div style={{ textAlign: 'center' }}>$ {addCommasToNumber(parseFloat(hexYieldUsd ?? 0).toFixed(2))}<br/><br/>{addCommasToNumber(parseFloat(hexYield ?? 0).toFixed(0))} HEX</div>}>
                     <Row>
-                        <div style={{ fontSize: 20, position: 'absolute', top: 10, left: 15}}>Mined</div>
-                        <div style={{ alignItems: 'center', fontSize: 28, paddingTop: 10, position: 'relative' }}>
+                        <div style={{ fontSize: 20, textAlign: 'center', width: '100%' }}>Mined</div>
+                        <div style={{ fontSize: 28, marginTop: 6, position: 'relative', textAlign: 'center' }}>
                             $ {fUnit( hexYieldUsd ?? 0, 1 )}
 
-                            <div style={{ position: 'absolute', bottom: -18, right: 5}} className="icon-mute">
-                                <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', verticalAlign: 'middle', paddingTop: 20, fontSize: 16}} className="mute">
+                            <div style={{ marginTop: 4, width: '100%' }} className="icon-mute">
+                                <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', verticalAlign: 'middle', paddingTop: 0, fontSize: 16}} className="mute">
                                     {fUnit( hexYield ?? 0, 3 )} <Icon icon={icons_list.hex} size={18} style={{marginLeft: 5}} />
                                 </div>
                             </div>
@@ -700,9 +731,8 @@ const formatSignedUsd = amount => {
                         <div
                             style={{
                                 fontSize: 20,
-                                position: "absolute",
-                                top: 10,
-                                left: 15
+                                textAlign: "center",
+                                width: "100%"
                             }}
                         >
                             DCA Price
@@ -710,7 +740,7 @@ const formatSignedUsd = amount => {
 
                         <div
                             style={{
-                                paddingTop: 8,
+                                marginTop: 6,
                                 fontSize: dcaLoading ? 20 : 25
                             }}
                         >
@@ -726,6 +756,37 @@ const formatSignedUsd = amount => {
                                     }}
                                 >
                                     {dcaProgressText}
+                                </div>
+                            )}
+                        </div>
+                    </Row>
+                </Tooltip>
+
+                <Tooltip
+                    content={<div style={{ textAlign: "center" }}>
+                        Estimated P&amp;L on historically priced HEX purchases at the current HEX price.<br/><br/>
+                        Current value: $ {addCommasToNumber(dcaCurrentValue.toFixed(2))}<br/>
+                        Cost basis: $ {addCommasToNumber(Number(effectiveDcaBasis ?? 0).toFixed(2))}
+                        {usesReconstructedDca && <><br/><br/>Fallback uses basis carried into active HEX stakes when direct purchase history cannot be fully classified.</>}
+                    </div>}
+                    placement="right"
+                >
+                    <Row>
+                        <div style={{ fontSize: 20, textAlign: "center", width: "100%" }}>P&amp;L</div>
+                        <div style={{
+                            marginTop: 6,
+                            fontSize: fitPnlFontSize(hasEffectiveDcaPrice && Number.isFinite(dcaReturnPercent) ? formatSignedUsd(dcaProfit) : "$ N/A"),
+                            whiteSpace: "nowrap",
+                            maxWidth: "100%",
+                            lineHeight: 1.05,
+                            color: Number.isFinite(dcaReturnPercent) ? (dcaProfit >= 0 ? "#45e88d" : "#ff6868") : undefined
+                        }}>
+                            {hasEffectiveDcaPrice && Number.isFinite(dcaReturnPercent)
+                                ? formatSignedUsd(dcaProfit)
+                                : "$ N/A"}
+                            {hasEffectiveDcaPrice && Number.isFinite(dcaReturnPercent) && (
+                                <div style={{ marginTop: 5, fontSize: 15 }}>
+                                    {dcaReturnPercent >= 0 ? "+" : ""}{dcaReturnPercent.toFixed(2)}%
                                 </div>
                             )}
                         </div>

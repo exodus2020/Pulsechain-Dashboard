@@ -1,36 +1,36 @@
 # 🚀 PulseChain Dashboard
 
-Privacy-first portfolio tracker for PulseChain assets with real-time pricing and historical charting.
+Privacy-first PulseChain portfolio tracker with real-time pricing, historical cost basis, P&L analytics, HEX staking, liquidity tracking, and multi-wallet support.
 
 > Built for privacy. Runs locally. No tracking. No middlemen.
 
 ## 📸 Screenshots
 
-PulseChain Dashboard provides an all-in-one desktop interface for tracking portfolios, HEX staking, liquidity positions, and multi-chain analytics.
+PulseChain Dashboard provides an all-in-one desktop interface for tracking portfolios, token P&L and cost basis, HEX staking, liquidity positions, farming rewards, and multi-wallet analytics.
 
 <br>
 
 <table>
 <tr>
-<td align="center"><strong>Dashboard Overview</strong></td>
-<td align="center"><strong>Lifetime HEX DCA</strong></td>
+<td align="center"><strong>Portfolio Overview & Token P&L</strong></td>
+<td align="center"><strong>Token Cost Basis & P&L</strong></td>
 </tr>
 
 <tr>
 <td align="center">
-<img src="public/Screenshots/Overview.png" width="500" alt="Dashboard Overview">
+<img src="public/Screenshots/2.3.0/Dashboard%20Overview.png" width="500" alt="PulseChain Dashboard Portfolio Overview and Token P&L">
 </td>
 <td align="center">
-<img src="public/Screenshots/2.2.0/Detailed tooltip of average entry.png" width="500" alt="Lifetime HEX DCA">
+<img src="public/Screenshots/2.3.0/Token%20P%26L%20Cost-Basis%20Tooltip.png" width="500" alt="Token P&L Cost Basis Details">
 </td>
 </tr>
 
 <tr>
 <td align="center">
-The complete portfolio dashboard with real-time balances, market data, and analytics.
+Track your complete PulseChain portfolio with real-time balances, token prices, estimated cost basis, and profit/loss.
 </td>
 <td align="center">
-View your weighted lifetime HEX average entry price using historical purchases from Ethereum and PulseChain.
+View reconstructed average entry, cost basis, current value, and estimated P&L using historical on-chain activity and market pricing.
 </td>
 </tr>
 
@@ -40,28 +40,91 @@ View your weighted lifetime HEX average entry price using historical purchases f
 </tr>
 
 <tr>
+<td align="center"><strong>HEX Miner Analytics</strong></td>
 <td align="center"><strong>Multiple Wallet Tracking</strong></td>
-<td align="center"><strong>Multi-Chain Analytics</strong></td>
 </tr>
 
 <tr>
 <td align="center">
-<img src="public/Screenshots/2.2.0/Multiple wallet tracking.png" width="500" alt="Multiple Wallet Tracking">
+<img src="public/Screenshots/2.3.0/HEX%20Miners%20Dashboard.png" width="500" alt="HEX Miner Analytics Dashboard">
 </td>
 <td align="center">
-<img src="public/Screenshots/2.2.0/Multiple wallets and multi-chain tracking.png" width="500" alt="Multi-Chain Analytics">
+<img src="public/Screenshots/2.3.0/Multiple%20Wallet%20Tracking%281%29.png" width="500" alt="Multiple Wallet Tracking">
 </td>
 </tr>
 
 <tr>
 <td align="center">
-Track multiple wallets simultaneously while keeping balances organized.
+Monitor active HEX stakes with principal, mined HEX, T-Shares, staking ladder, weighted DCA price, and estimated P&L.
 </td>
 <td align="center">
-Analyze purchases across multiple wallets and both supported blockchains using a combined weighted average entry price.
+Track multiple wallets simultaneously with individual holdings, stakes, farms, liquidity positions, and combined portfolio analytics.
 </td>
 </tr>
 </table>
+
+## v2.3.0 — Portfolio P&L & Cost Basis
+
+Version 2.3.0 introduces historical cost-basis tracking and portfolio profit/loss calculations to the PulseChain Dashboard.
+
+### 📊 Token P&L Tracking
+- Added estimated Profit & Loss (P&L) for tokens in the Token Watchlist.
+- Displays both USD profit/loss and percentage return.
+- Reconstructs historical cost basis using wallet transaction history and historical PulseChain pricing.
+- Calculates average entry price using amount-weighted cost basis.
+- Supports combined P&L across multiple visible wallets.
+
+### 👛 Multi-Wallet Accounting
+- P&L is calculated independently for each wallet and aggregated when multiple wallets are visible.
+- Wallet-to-wallet transfers preserve the original token cost basis.
+- Hiding or showing wallets instantly recalculates portfolio totals using cached wallet data.
+- Improved handling of external token transfers and incomplete transaction histories.
+
+### ⚡ Faster P&L Loading & Persistent Caching
+- Added persistent per-wallet/token P&L caching.
+- Previously calculated wallet histories can be restored after restarting the application.
+- Historical calculations are reused when changing visible wallets.
+- Token calculations run concurrently to improve initial loading speed while limiting RPC/API pressure.
+- Added a visible P&L calculation progress bar to the Token Watchlist.
+
+### ⛏️ HEX Miner Cost Basis
+- Improved HEX Miner DCA and P&L calculations.
+- HEX cost basis is preserved when HEX enters an active stake.
+- Stake principal retains its original investment basis.
+- Yield generated from completed stakes is treated separately from invested principal.
+- Miner DCA now uses reconstructed active-stake cost basis when available.
+
+### 💎 PLS / WPLS Accounting
+- Improved historical accounting for native PLS and Wrapped PLS.
+- Native PLS and WPLS holdings are reconciled with the dashboard's combined Pulse balance.
+- Added fallback historical pricing for older Pulse positions where complete explorer history is unavailable.
+- P&L estimates remain available when historical transaction coverage is incomplete.
+
+### 🔷 PRVX Cost Basis
+- Added cost-basis handling for PRVX sacrifice distributions.
+- Sacrifice distributions use the maximum sacrifice multiplier when reconstructing estimated investment basis.
+- Normal PRVX purchases continue to use their actual reconstructed purchase cost when available.
+
+### 🌱 Mined & Reward Tokens
+- Improved handling of tokens received through mining, farming, staking rewards, or similar zero-cost distributions.
+- Zero-cost holdings can now correctly display P&L instead of appearing as unavailable.
+
+### 🎨 UI & Quality-of-Life Improvements
+- Added P&L information directly to Token Watchlist entries.
+- Added detailed tooltips explaining estimated or reconstructed cost basis.
+- Removed unnecessary approximation symbols from the main P&L display.
+- Added a prominent progress indicator while historical P&L is being calculated.
+- Portfolio percentage and USD change now remain visible while balances refresh, preventing layout movement.
+- Improved overall stability when switching between wallets and refreshing portfolio data.
+
+### 🛠️ Reliability Improvements
+- Fixed incomplete PulseChain token-transfer history caused by explorer pagination limits.
+- Improved historical PulseX price reconstruction using on-chain liquidity pools.
+- Added additional safeguards for incomplete or unusual wallet histories.
+- Improved P&L handling for transferred, staked, rewarded, and partially reconstructed positions.
+- Expanded caching and recovery logic to reduce unnecessary historical queries.
+
+> **Note:** P&L and cost-basis values are estimates reconstructed from available on-chain transaction history and historical market data. Complex DeFi activity, incomplete explorer history, sacrifice distributions, bridged assets, or other unusual transactions may result in differences from actual tax or accounting cost basis.
 
 ## 🚀 v2.2.1 — RPC Reliability & Farm Reward Accuracy
 
@@ -261,17 +324,24 @@ All data is stored locally and encrypted for maximum privacy.
 
 ## ✨ Features
 
-* 📊 Track PulseChain token balances
+* 📊 Track PulseChain token balances and portfolio value
+* 💰 Estimated token Profit & Loss (P&L) with historical cost-basis reconstruction
+* 📈 Amount-weighted average entry prices across multiple wallets
+* 👛 Track and combine multiple wallets with independent cost-basis accounting
+* 🔄 Cost-basis preservation across wallet-to-wallet token transfers
+* ⚡ Persistent P&L caching for faster startup and wallet switching
 * 💧 Monitor PulseX liquidity positions
-* 🌾 View farming positions and rewards
-* 🔐 Fully local + encrypted data storage
-* ⚡ Real-time price updates
+* 🌾 View farming positions, rewards, and estimated INC/day
 * 🧾 HEX stake tracking and analytics
+* ⛏️ Active HEX Miner DCA, cost basis, and P&L tracking
 * 📈 Lifetime HEX DCA tracking across Ethereum & PulseChain
-* 🔧 Custom RPC endpoints
+* 📉 Real-time token pricing and historical price charts
+* 🔎 Scan wallets for PulseChain tokens and manage custom watchlists
+* 🔐 Fully local + encrypted portfolio storage
 * 📁 Import / export encrypted portfolios
-* 🖥️ Cross-platform (Windows, MacOS, Linux)
-
+* 🔧 Custom RPC endpoints
+* 🌐 Built-in PulseChain ecosystem dApp access
+* 🖥️ Cross-platform support (Windows, macOS, Linux)
 ---
 
 ## 🛠️ Run from Source

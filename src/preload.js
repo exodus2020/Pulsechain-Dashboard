@@ -16,4 +16,5 @@ contextBridge.exposeInMainWorld('electron', {
   toggleMode: (height, width) => ipcRenderer.invoke('toggle-mode', height, width),
   getMode: () => ipcRenderer.invoke('get-mode'),
   fetchJson: (url) => ipcRenderer.invoke('fetch-json', url),
+  fetchJsonPost: (url, body) => ipcRenderer.invoke('fetch-json-post', url, body),
 })

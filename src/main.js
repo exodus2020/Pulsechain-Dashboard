@@ -203,13 +203,56 @@ ipcMain.handle('checkVersion', async (event, folder) => {
     return null
   }
 })
+ipcMain.handle('fetch-json-post', async (event, url, body) => {
+  try {
+    const allowedUrl =
+      typeof url === 'string' &&
+      (
+        url.startsWith('https://coins.llama.fi/')
+      )
+
+    if (!allowedUrl) {
+      return { ok: false, status: 400, error: 'Unsupported URL' }
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
+          'AppleWebKit/537.36 Chrome/137.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body ?? {}),
+      timeout: 20000
+    })
+
+    const text = await response.text()
+    let data = null
+    try { data = text ? JSON.parse(text) : null } catch { data = text }
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      data,
+      error: response.ok ? null : (data?.message || data?.error || text || `HTTP ${response.status}`)
+    }
+  } catch (error) {
+    return { ok: false, status: 0, error: error?.message || String(error) }
+  }
+})
+
 ipcMain.handle('fetch-json', async (event, url) => {
   try {
     const allowedUrl =
     typeof url === 'string' &&
     (
       url.startsWith('https://api.geckoterminal.com/') ||
-      url.startsWith('https://data-api.binance.vision/')
+      url.startsWith('https://api.coingecko.com/') ||
+      url.startsWith('https://data-api.binance.vision/') ||
+      url.startsWith('https://coins.llama.fi/') ||
+      url.startsWith('https://api.dexscreener.com/')
     )
 
   if (!allowedUrl) {
@@ -236,7 +279,7 @@ ipcMain.handle('fetch-json', async (event, url) => {
       return {
         ok: false,
         status: response.status,
-        error: `GeckoTerminal returned ${response.status}`
+        error: `Remote price API returned ${response.status}`
       }
     }
 
@@ -250,7 +293,7 @@ ipcMain.handle('fetch-json', async (event, url) => {
       return {
         ok: false,
         status: 500,
-        error: 'GeckoTerminal returned invalid JSON'
+        error: 'Remote price API returned invalid JSON'
       }
     }
   } catch (error) {
@@ -259,7 +302,7 @@ ipcMain.handle('fetch-json', async (event, url) => {
       status: 0,
       error:
         error?.message ??
-        'Unable to retrieve GeckoTerminal data'
+        'Unable to retrieve remote price data'
     }
   }
 })

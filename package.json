@@ -1,6 +1,6 @@
 {
   "name": "pulsechain-dashboard",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "main": "./src/main.js",
   "author": "",
   "license": "ISC",

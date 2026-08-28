@@ -26,6 +26,7 @@ import useHistory from './hooks/useHistory'
 import WalletsPage from './pages/WalletsPage'
 import useHex from './hooks/useHex'
 import useHexDca from "./hooks/useHexDca"
+import useTokenPnl from "./hooks/useTokenPnl"
 import DeleteDataModal from './shared/DeleteDataModal'
 import Button from './components/Button'
 import Icon from './components/Icon'
@@ -163,7 +164,15 @@ function AppMain({context}) {
   const hexDcaData = useHexDca({
     wallets: context?.data?.wallets ?? {},
     hiddenWallets
-})
+  })
+  const tokenPnlData = useTokenPnl({
+    wallets: context?.data?.wallets ?? {},
+    hiddenWallets,
+    watchlist: context?.data?.watchlist ?? {},
+    currentBalances: balanceData?.balances ?? {},
+    settings,
+    enabled: hexDcaData?.loading !== true
+  })
   const lpData = useLPs({context, priceData})
   const historyData = useHistory({ priceData })
   const communityData = useCommunityDapp(context)
@@ -189,7 +198,7 @@ function AppMain({context}) {
   return (
     <AppWrapper>
         <Layout fees={fees} toggleMode={toggleMode}>
-          {!appPage ? <WalletsPage priceData={priceData} balanceData={balanceData} farmData={farmData} lpData={lpData} historyData={historyData} hexData={hexData} hexDcaData={hexDcaData}/> : ''}
+          {!appPage ? <WalletsPage priceData={priceData} balanceData={balanceData} farmData={farmData} lpData={lpData} historyData={historyData} hexData={hexData} hexDcaData={hexDcaData} tokenPnlData={tokenPnlData}/> : ''}
           {appPage == 'activities' ? <ActivitiesPage priceData={priceData} balanceData={balanceData} farmData={farmData}/> : ''}
         </Layout>
         <div className="small-on-mobile">

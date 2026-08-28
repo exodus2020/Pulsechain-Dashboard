@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 
-const LoadingWave = ({ speed = 500, numDots = 10, scale = 0.3 }) => {
+const LoadingWave = ({ speed = 500, numDots = 10, scale = 0.3, transformOrigin = "center center" }) => {
   const [wavePosition, setWavePosition] = useState(0);
 
   useEffect(() => {
@@ -40,7 +40,7 @@ const LoadingWave = ({ speed = 500, numDots = 10, scale = 0.3 }) => {
   };
 
   return (
-    <div style={{ display: "flex", alignItems: "flex-end", transform: `scale(${scale})` }}>
+    <div style={{ display: "flex", alignItems: "flex-end", transform: `scale(${scale})`, transformOrigin }}>
       {renderDots()}
     </div>
   );
