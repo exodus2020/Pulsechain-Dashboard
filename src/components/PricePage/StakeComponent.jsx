@@ -78,7 +78,7 @@ const Row = styled.div`
     }
 `
 
-export function StakeComponent({hexData, hexDcaData, hexTokenPnl, hexPrice, hiddenWallets, disabled, visibleWallets}) {
+export function StakeComponent({hexData, hexDcaData, hexTokenPnl, hexWalletPositions = {}, walletBalances = {}, hexPrice, hiddenWallets, disabled, visibleWallets, liquidHexUnits = 0}) {
 
     const formatTShares = (tShares) => hexData.stats.totalTShares < 100 ? tShares.toFixed(3) : `${fUnit(tShares, 2)}`
     const formatLength = (length) => length < 364 ? `${length}d` : `${parseFloat(length / 365).toFixed(2)}y`
@@ -171,42 +171,6 @@ export function StakeComponent({hexData, hexDcaData, hexTokenPnl, hexPrice, hidd
     const dcaPrice =
         Number(hexDcaData?.stats?.averagePrice)
 
-    const hasDcaPrice =
-        Number.isFinite(dcaPrice) &&
-        dcaPrice > 0
-
-    // V33: if the direct HEX-purchase scanner cannot classify an old/large
-    // wallet, prefer the cost basis that was actually carried into active HEX
-    // stakes. Falling back to the LIQUID HEX average alone made large staking
-    // wallets show absurdly tiny DCA prices and also poisoned the all-wallet
-    // aggregate. The token P&L ledger now preserves stake-start basis separately.
-    const reconstructedStakeUnits = Number(hexTokenPnl?.stakedUnits ?? 0)
-    const reconstructedStakeBasis = Number(hexTokenPnl?.stakedCostBasisUsd ?? 0)
-    const reconstructedStakeEntry =
-        reconstructedStakeUnits > 0 && reconstructedStakeBasis > 0
-            ? reconstructedStakeBasis / reconstructedStakeUnits
-            : null
-    const reconstructedHexEntry = Number(hexTokenPnl?.averageEntry)
-    const fallbackHexEntry =
-        Number.isFinite(reconstructedStakeEntry) && reconstructedStakeEntry > 0
-            ? reconstructedStakeEntry
-            : (Number.isFinite(reconstructedHexEntry) && reconstructedHexEntry > 0
-                ? reconstructedHexEntry
-                : null)
-    const hasReconstructedHexEntry = Number.isFinite(fallbackHexEntry) && fallbackHexEntry > 0
-
-    // V34: the miner cards must use one basis source consistently. The per-wallet
-    // token ledger carries basis into active stakes and aggregates it by summing
-    // cost basis + principal units, which gives the correct amount-weighted DCA.
-    // Prefer that ledger whenever active stake basis is available; only fall back
-    // to the legacy purchase scanner when no reconstructed stake basis exists.
-    const usesReconstructedDca =
-        reconstructedStakeUnits > 0 && reconstructedStakeBasis > 0 && hasReconstructedHexEntry
-    const effectiveDcaPrice = usesReconstructedDca
-        ? reconstructedStakeEntry
-        : (hasDcaPrice ? dcaPrice : (hasReconstructedHexEntry ? fallbackHexEntry : null))
-    const hasEffectiveDcaPrice = Number.isFinite(effectiveDcaPrice) && effectiveDcaPrice > 0
-
     const dcaPurchaseCount =
         Number(hexDcaData?.stats?.purchaseCount ?? 0)
 
@@ -223,23 +187,297 @@ export function StakeComponent({hexData, hexDcaData, hexTokenPnl, hexPrice, hidd
             hexDcaData?.stats?.pricedHexPurchased ?? 0
         )
 
-    const directDcaCurrentValue = dcaPricedHex * Number(hexUsd ?? 0)
     const directDcaBasis = Number(hexDcaData?.stats?.totalUsdSpent ?? 0)
 
-    // For reconstructed stake basis, P&L is the active principal's current
-    // value minus the cost basis carried into that principal. This keeps the
-    // miner P&L card aligned with the currently selected wallet(s).
-    const reconstructedStakeCurrentValue = reconstructedStakeUnits * Number(hexUsd ?? 0)
-    const dcaCurrentValue = usesReconstructedDca && reconstructedStakeUnits > 0
-        ? reconstructedStakeCurrentValue
-        : directDcaCurrentValue
-    const effectiveDcaBasis = usesReconstructedDca && reconstructedStakeBasis > 0
-        ? reconstructedStakeBasis
-        : directDcaBasis
+    // V43: a direct DCA price is only valid when the scanner actually found and
+    // priced purchases. Previously a fallback average could survive while the
+    // tooltip correctly reported 0 purchases / $0 spent, producing a convincing
+    // but internally contradictory DCA card. Refuse that state.
+    const hasDcaPrice =
+        Number.isFinite(dcaPrice) && dcaPrice > 0 &&
+        dcaPurchaseCount > 0 &&
+        dcaPricedHex > 0 &&
+        Number.isFinite(directDcaBasis) && directDcaBasis > 0
+
+    // The historical token ledger can preserve the basis carried into stakeStart.
+    // It is useful for an amount-weighted miner entry, but explorer gaps can leave
+    // old stakeEnd events unmatched. Never trust its *unit count* as the current
+    // stake principal: reconcile the entry price against the principal that the
+    // live HEX stake data says is actually present right now.
+    const reconstructedStakeUnits = Number(hexTokenPnl?.stakedUnits ?? 0)
+    const reconstructedStakeBasis = Number(hexTokenPnl?.stakedCostBasisUsd ?? 0)
+    const reconstructedStakeEntry =
+        reconstructedStakeUnits > 0 && reconstructedStakeBasis > 0
+            ? reconstructedStakeBasis / reconstructedStakeUnits
+            : null
+    // Only trust the token-ledger stake basis when that visible-wallet ledger is
+    // complete. An incomplete ledger can still contain a partial staked basis,
+    // which previously overrode the valid DCA fallback and produced wildly wrong
+    // miner DCA/P&L when some wallets were hidden.
+    const reconstructedLedgerComplete = hexTokenPnl?.complete === true
+    const hasReconstructedStakeEntry =
+        reconstructedLedgerComplete &&
+        Number.isFinite(reconstructedStakeEntry) && reconstructedStakeEntry > 0
+
+    const actualStakeUnits = Math.max(0, Number(stakedHex ?? 0))
+    const usesReconstructedDca =
+        actualStakeUnits > 0 &&
+        reconstructedStakeUnits > 0 &&
+        reconstructedStakeBasis > 0 &&
+        hasReconstructedStakeEntry
+
+    // V45: If active-stake basis and direct purchase DCA are both unavailable,
+    // allow a substantial, fully-priced liquid HEX ledger from the SAME visible
+    // wallet set to provide an explicitly estimated entry for active principal.
+    // This is preferable to inventing a stake-start market price and keeps the
+    // miner estimate tied to the wallet's own reconstructed history.
+    const reconstructedLiquidUnits = Number(hexTokenPnl?.units ?? 0)
+    const reconstructedLiquidBasis = Number(hexTokenPnl?.costBasisUsd ?? 0)
+    const reconstructedLiquidEntry =
+        reconstructedLiquidUnits > 0 && reconstructedLiquidBasis > 0
+            ? reconstructedLiquidBasis / reconstructedLiquidUnits
+            : null
+    const actualLiquidUnits = Math.max(0, Number(liquidHexUnits ?? 0))
+    const liquidCoverage =
+        actualLiquidUnits > 0 && reconstructedLiquidUnits > 0
+            ? Math.min(
+                reconstructedLiquidUnits / actualLiquidUnits,
+                actualLiquidUnits / reconstructedLiquidUnits
+            )
+            : 0
+    const canUseLiquidHexFallback =
+        actualStakeUnits > 0 &&
+        hexTokenPnl?.complete === true &&
+        Number(hexTokenPnl?.unpricedAcquisitionCount ?? 0) === 0 &&
+        reconstructedLiquidUnits >= 1_000_000 &&
+        liquidCoverage >= 0.25 &&
+        Number.isFinite(reconstructedLiquidEntry) &&
+        reconstructedLiquidEntry > 0
+
+    const usesLiquidHexFallback =
+        !usesReconstructedDca &&
+        !hasDcaPrice &&
+        canUseLiquidHexFallback
+
+    // V46: calculate each selected wallet's active-stake basis independently,
+    // then add the dollar bases together. Never calculate one synthetic entry
+    // price from an aggregate liquid ledger and apply it to every wallet's stake.
+    //
+    // This is important when wallet A and wallet B use different valid basis
+    // sources/entry prices. Combined P&L must equal Σ(wallet P&L).
+    const HEX_ADDRESS =
+        "0x2b591e99afe9f32eaa6214f7b7629768c40eeb39"
+
+    const normalizeWallet = address =>
+        String(address ?? "").toLowerCase().trim()
+
+    const dcaWalletStatsByAddress = new Map(
+        (Array.isArray(hexDcaData?.stats?.walletStats)
+            ? hexDcaData.stats.walletStats
+            : []
+        ).map(item => [normalizeWallet(item?.wallet), item])
+    )
+
+    const getWalletStakeUnits = wallet => {
+        const walletStakes = (hexData?.combinedStakes ?? []).filter(stake => {
+            return normalizeWallet(stake?.parent) === normalizeWallet(wallet)
+        })
+        return Math.max(
+            0,
+            Number(parseHexStats(walletStakes)?.totalStakedHex ?? 0)
+        )
+    }
+
+    const getWalletLiquidUnits = wallet => {
+        const normalizedWallet = normalizeWallet(wallet)
+        return Math.max(
+            0,
+            Number(
+                walletBalances?.[normalizedWallet]?.balances?.[HEX_ADDRESS]
+                    ?.normalized ??
+                walletBalances?.[wallet]?.balances?.[HEX_ADDRESS]?.normalized ??
+                0
+            )
+        )
+    }
+
+    const getWalletMinerBasis = wallet => {
+        const normalizedWallet = normalizeWallet(wallet)
+        const stakeUnits = getWalletStakeUnits(normalizedWallet)
+
+        if (!(stakeUnits > 0)) {
+            return {
+                wallet: normalizedWallet,
+                stakeUnits: 0,
+                basisUsd: 0,
+                entry: null,
+                source: "no-active-stakes"
+            }
+        }
+
+        const ledger =
+            hexWalletPositions?.[normalizedWallet]?.[HEX_ADDRESS] ??
+            hexWalletPositions?.[wallet]?.[HEX_ADDRESS] ??
+            null
+
+        const ledgerStakeUnits = Number(ledger?.stakedUnits ?? 0)
+        const ledgerStakeBasis = Number(ledger?.stakedCostBasisUsd ?? 0)
+        const ledgerStakeEntry =
+            ledgerStakeUnits > 0 && ledgerStakeBasis > 0
+                ? ledgerStakeBasis / ledgerStakeUnits
+                : null
+
+        const walletDca = dcaWalletStatsByAddress.get(normalizedWallet)
+        const directEntry = Number(walletDca?.averagePrice ?? 0)
+        const directSpent = Number(walletDca?.totalUsdSpent ?? 0)
+        const directPricedHex = Number(walletDca?.pricedHexPurchased ?? 0)
+        const directPurchases = Number(walletDca?.purchaseCount ?? 0)
+        const hasDirectWalletDca =
+            Number.isFinite(directEntry) &&
+            directEntry > 0 &&
+            directSpent > 0 &&
+            directPricedHex > 0 &&
+            directPurchases > 0
+
+        // V47: prefer the wallet's directly reconstructed purchase DCA whenever
+        // it exists. The active-stake ledger can contain a stakeStart market-price
+        // estimate for principal that predates the explorer's usable liquid history.
+        // That estimate is useful only as a last resort; treating it as an exact
+        // acquisition basis caused old stakes (Wallet 4 exposed this) to inherit
+        // stake-date HEX prices such as ~$0.075 instead of the wallet's actual
+        // reconstructed purchase entry (~$0.006).
+        if (hasDirectWalletDca) {
+            return {
+                wallet: normalizedWallet,
+                stakeUnits,
+                basisUsd: directEntry * stakeUnits,
+                entry: directEntry,
+                source: "wallet-purchase-dca",
+                ledgerStakeEntry: Number.isFinite(ledgerStakeEntry) ? ledgerStakeEntry : null
+            }
+        }
+
+        // If no direct purchase DCA exists, a complete active-stake ledger is the
+        // next-best wallet-specific source.
+        if (
+            ledger?.complete === true &&
+            Number.isFinite(ledgerStakeEntry) &&
+            ledgerStakeEntry > 0
+        ) {
+            return {
+                wallet: normalizedWallet,
+                stakeUnits,
+                basisUsd: ledgerStakeEntry * stakeUnits,
+                entry: ledgerStakeEntry,
+                source: "active-stake-ledger"
+            }
+        }
+
+        const liquidUnits = Number(ledger?.units ?? 0)
+        const liquidBasis = Number(ledger?.costBasisUsd ?? 0)
+        const liquidEntry =
+            liquidUnits > 0 && liquidBasis > 0
+                ? liquidBasis / liquidUnits
+                : null
+
+        const actualLiquidUnits = getWalletLiquidUnits(normalizedWallet)
+        const coverage =
+            actualLiquidUnits > 0 && liquidUnits > 0
+                ? Math.min(
+                    liquidUnits / actualLiquidUnits,
+                    actualLiquidUnits / liquidUnits
+                )
+                : 0
+
+        const canUseLiquidFallback =
+            ledger?.complete === true &&
+            Number(ledger?.unpricedAcquisitionCount ?? 0) === 0 &&
+            liquidUnits >= 1_000_000 &&
+            coverage >= 0.25 &&
+            Number.isFinite(liquidEntry) &&
+            liquidEntry > 0
+
+        if (canUseLiquidFallback) {
+            return {
+                wallet: normalizedWallet,
+                stakeUnits,
+                basisUsd: liquidEntry * stakeUnits,
+                entry: liquidEntry,
+                source: "wallet-liquid-history-estimate",
+                coverage
+            }
+        }
+
+        return {
+            wallet: normalizedWallet,
+            stakeUnits,
+            basisUsd: 0,
+            entry: null,
+            source: "unavailable",
+            coverage
+        }
+    }
+
+    const selectedWalletMinerBasis = walletsToShow
+        .map(getWalletMinerBasis)
+        .filter(item => item.stakeUnits > 0)
+
+    const allSelectedStakeBasisAvailable =
+        selectedWalletMinerBasis.length > 0 &&
+        selectedWalletMinerBasis.every(item =>
+            Number.isFinite(item.entry) && item.entry > 0
+        )
+
+    const summedWalletStakeUnits = selectedWalletMinerBasis.reduce(
+        (sum, item) => sum + Number(item.stakeUnits ?? 0),
+        0
+    )
+
+    const summedWalletStakeBasis = selectedWalletMinerBasis.reduce(
+        (sum, item) => sum + Number(item.basisUsd ?? 0),
+        0
+    )
+
+    // Use wallet-by-wallet aggregation whenever every selected active-stake
+    // wallet has a usable basis. Fall back to the old aggregate path only while
+    // per-wallet ledgers are still loading.
+    const usesWalletAggregation =
+        allSelectedStakeBasisAvailable &&
+        summedWalletStakeUnits > 0 &&
+        summedWalletStakeBasis > 0
+
+    const legacyEffectiveDcaPrice = usesReconstructedDca
+        ? reconstructedStakeEntry
+        : hasDcaPrice
+            ? dcaPrice
+            : usesLiquidHexFallback
+                ? reconstructedLiquidEntry
+                : null
+
+    const effectiveDcaPrice = usesWalletAggregation
+        ? summedWalletStakeBasis / summedWalletStakeUnits
+        : legacyEffectiveDcaPrice
+
+    const hasEffectiveDcaPrice =
+        Number.isFinite(effectiveDcaPrice) &&
+        effectiveDcaPrice > 0
+
+    const activeStakeCurrentValue =
+        actualStakeUnits * Number(hexUsd ?? 0)
+
+    const activeStakeBasis = usesWalletAggregation
+        ? summedWalletStakeBasis
+        : hasEffectiveDcaPrice
+            ? effectiveDcaPrice * actualStakeUnits
+            : 0
+
+    const dcaCurrentValue = activeStakeCurrentValue
+    const effectiveDcaBasis = activeStakeBasis
     const dcaProfit = dcaCurrentValue - effectiveDcaBasis
     const dcaReturnPercent = effectiveDcaBasis > 0
         ? (dcaProfit / effectiveDcaBasis) * 100
         : null
+
 
     const dcaUnpricedCount =
         Number(
@@ -361,7 +599,7 @@ const fitPnlFontSize = value => {
                     boxSizing: "border-box"
                 }}
             >
-                <strong>{usesReconstructedDca ? "Estimated Average Entry" : "Average Entry"}</strong>
+                <strong>{usesWalletAggregation ? "Active Stake Weighted Entry" : usesReconstructedDca ? "Estimated Active Stake Entry" : "Active Stake Entry"}</strong>
                 <br/>
                 $ {effectiveDcaPrice.toFixed(6)}
 
@@ -389,100 +627,86 @@ const fitPnlFontSize = value => {
 
                 <br/><br/>
 
-                <strong>HEX Purchased</strong>
+                <strong>Active Staked HEX</strong>
                 <br/>
                 {addCommasToNumber(
-                    (usesReconstructedDca && reconstructedStakeUnits > 0
-                        ? reconstructedStakeUnits
-                        : dcaTotalHex).toFixed(0)
+                    Number(actualStakeUnits ?? 0).toFixed(0)
+                )}
+
+                <br/><br/>
+                <strong>Active Stake P&amp;L</strong>
+                <br/>
+                {dcaProfit >= 0 ? "+" : "-"}$ {addCommasToNumber(
+                    Math.abs(Number(dcaProfit ?? 0)).toFixed(2)
+                )}
+                {Number.isFinite(dcaReturnPercent) && (
+                    <>
+                        <br/>
+                        {dcaReturnPercent >= 0 ? "+" : ""}
+                        {dcaReturnPercent.toFixed(2)}%
+                    </>
                 )}
 
                 <br/><br/>
 
-                {dcaPurchaseCount} purchase{
-                    dcaPurchaseCount === 1 ? "" : "s"
-                }
-                <div
-                    style={{
-                        borderTop:
-                            "1px solid rgba(255,255,255,0.2)",
-                        margin: "16px 0 12px"
-                    }}
-                />
+                {(usesWalletAggregation || usesReconstructedDca) && (
+                    <>
+                        <span className="mute">
+                            {usesWalletAggregation
+                                ? "Basis source: wallet-by-wallet active-stake basis, weighted by each selected wallet's live stake principal."
+                                : "Basis source: amount-weighted active-stake ledger, reconciled to the live selected-wallet stake principal."}
+                        </span>
+                    </>
+                )}
 
-                <strong>Network Breakdown</strong>
+                {dcaPurchaseCount > 0 && (
+                    <>
+                        <div
+                            style={{
+                                borderTop:
+                                    "1px solid rgba(255,255,255,0.2)",
+                                margin: "18px 0 12px"
+                            }}
+                        />
+                        <strong>Lifetime Purchase History</strong>
+                        <br/><br/>
+                        <strong>HEX Purchased</strong>
+                        <br/>
+                        {addCommasToNumber(
+                            Number(dcaTotalHex ?? 0).toFixed(0)
+                        )}
+                        <br/><br/>
+                        {dcaPurchaseCount} purchase{
+                            dcaPurchaseCount === 1 ? "" : "s"
+                        }
+                        <br/><br/>
+                        <strong>Network Breakdown</strong>
 
-                <div style={{ marginTop: 14 }}>
-                    <strong>Ethereum</strong>
+                        <div style={{ marginTop: 14, color: "#8fbfff" }}>
+                            <strong>Ethereum</strong>
+                            <br/>
+                            Avg: {formatNetworkAverage(ethereumDcaStats)}
+                            <br/>
+                            Spent: $ {formatNetworkSpent(ethereumDcaStats)}
+                            <br/>
+                            {formatNetworkHex(ethereumDcaStats)} HEX
+                            <br/>
+                            {formatNetworkPurchaseCount(ethereumDcaStats)}
+                        </div>
 
-                    <br/>
-
-                    Avg: {
-                        formatNetworkAverage(
-                            ethereumDcaStats
-                        )
-                    }
-
-                    <br/>
-
-                    Spent: $ {
-                        formatNetworkSpent(
-                            ethereumDcaStats
-                        )
-                    }
-
-                    <br/>
-
-                    {
-                        formatNetworkHex(
-                            ethereumDcaStats
-                        )
-                    } HEX
-
-                    <br/>
-
-                    {
-                        formatNetworkPurchaseCount(
-                            ethereumDcaStats
-                        )
-                    }
-                </div>
-
-                <div style={{ marginTop: 14 }}>
-                    <strong>PulseChain</strong>
-
-                    <br/>
-
-                    Avg: {
-                        formatNetworkAverage(
-                            pulsechainDcaStats
-                        )
-                    }
-
-                    <br/>
-
-                    Spent: $ {
-                        formatNetworkSpent(
-                            pulsechainDcaStats
-                        )
-                    }
-
-                    <br/>
-
-                    {
-                        formatNetworkHex(
-                            pulsechainDcaStats
-                        )
-                    } HEX
-
-                    <br/>
-
-                    {
-                        formatNetworkPurchaseCount(
-                            pulsechainDcaStats
-                        )
-                    }
-                </div>
+                        <div style={{ marginTop: 14, color: "#c59cff" }}>
+                            <strong>PulseChain</strong>
+                            <br/>
+                            Avg: {formatNetworkAverage(pulsechainDcaStats)}
+                            <br/>
+                            Spent: $ {formatNetworkSpent(pulsechainDcaStats)}
+                            <br/>
+                            {formatNetworkHex(pulsechainDcaStats)} HEX
+                            <br/>
+                            {formatNetworkPurchaseCount(pulsechainDcaStats)}
+                        </div>
+                    </>
+                )}
                 {dcaUnpricedCount > 0 && (
                     <>
                         <br/><br/>
@@ -513,7 +737,7 @@ const fitPnlFontSize = value => {
                             }}
                         />
 
-                        <strong>Wallet Breakdown</strong>
+                        <strong>Wallet Purchase Breakdown</strong>
 
                         {dcaWalletStats.map(walletStat => {
                             const walletAveragePrice =
@@ -550,6 +774,24 @@ const fitPnlFontSize = value => {
                                     ) * 100
                                     : null
 
+                            const normalizedWalletStat =
+                                normalizeWalletAddress(walletStat.wallet)
+
+                            const minerBasisEntry =
+                                selectedWalletMinerBasis.find(item =>
+                                    normalizeWalletAddress(item.wallet) ===
+                                    normalizedWalletStat
+                                )
+
+                            const minerBasisSourceLabel =
+                                minerBasisEntry?.source === "wallet-purchase-dca"
+                                    ? "Purchase DCA"
+                                    : minerBasisEntry?.source === "active-stake-ledger"
+                                        ? "Active-stake ledger"
+                                        : minerBasisEntry?.source === "wallet-liquid-history-estimate"
+                                            ? "Liquid-history estimate"
+                                            : null
+
                             return (
                                 <div
                                     key={walletStat.wallet}
@@ -562,6 +804,15 @@ const fitPnlFontSize = value => {
                                             walletStat.wallet
                                         )}
                                     </strong>
+
+                                    {minerBasisSourceLabel && (
+                                        <>
+                                            <br/>
+                                            <span className="mute">
+                                                Miner basis: {minerBasisSourceLabel}
+                                            </span>
+                                        </>
+                                    )}
 
                                     <br/>
 
@@ -767,7 +1018,11 @@ const fitPnlFontSize = value => {
                         Estimated P&amp;L on historically priced HEX purchases at the current HEX price.<br/><br/>
                         Current value: $ {addCommasToNumber(dcaCurrentValue.toFixed(2))}<br/>
                         Cost basis: $ {addCommasToNumber(Number(effectiveDcaBasis ?? 0).toFixed(2))}
-                        {usesReconstructedDca && <><br/><br/>Fallback uses basis carried into active HEX stakes when direct purchase history cannot be fully classified.</>}
+                        {usesReconstructedDca
+                            ? <><br/><br/>Uses the amount-weighted basis carried into active HEX stakes, reconciled to the live active principal.</>
+                            : hasDcaPrice
+                                ? <><br/><br/>Fallback estimates active-stake basis using the wallet's reconstructed lifetime HEX average entry price.</>
+                                : null}
                     </div>}
                     placement="right"
                 >

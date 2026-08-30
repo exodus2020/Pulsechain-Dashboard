@@ -625,7 +625,7 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                 />
             </div>
             {hasHexStakes ? <div>
-                <StakeComponent visibleWallets={visibleWallets} disabled={hideHexMiners} hexData={hexData} hexDcaData={hexDcaData} hexTokenPnl={tokenPnlData?.positions?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} hexPrice={prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} hiddenWallets={hiddenWallets}/>
+                <StakeComponent visibleWallets={visibleWallets} disabled={hideHexMiners} hexData={hexData} hexDcaData={hexDcaData} hexTokenPnl={tokenPnlData?.positions?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} hexWalletPositions={tokenPnlData?.walletPositions ?? {}} walletBalances={balances ?? {}} hexPrice={prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} hiddenWallets={hiddenWallets} liquidHexUnits={Number(addressData?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']?.normalized ?? 0)}/>
 
                 {!hideHexMiners && <HexComponent hexData={hexData} visibleWallets={visibleWallets} hexPrice={prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} aliases={data?.aliases ?? {}}/>}
             </div> : ''}

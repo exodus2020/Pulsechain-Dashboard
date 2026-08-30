@@ -408,7 +408,7 @@ const fetchCompleteAddressInternalTransactions = async (wallet, settings, option
             nextPageParams = data?.next_page_params ?? null
             if (!nextPageParams || items.length === 0) break
         } catch (error) {
-            console.warn('Token P&L v40 PLS INTERNAL HISTORY FAILED', { wallet, message: error?.message })
+            console.debug('Token P&L v40 PLS INTERNAL HISTORY FAILED', { wallet, message: error?.message })
             break
         }
     }
@@ -678,7 +678,7 @@ const getTopPool = async (tokenAddress, network = "mainnet") => {
         safeLocalStorageSet(storageKey, JSON.stringify(result))
         return result
     } catch (error) {
-        console.warn("Token P&L v15 POOL UNAVAILABLE", { network, token, status: error?.status ?? null })
+        console.debug("Token P&L v15 POOL UNAVAILABLE", { network, token, status: error?.status ?? null })
         return null
     }
 }
@@ -886,7 +886,7 @@ const prefetchDefiLlamaPrices = async (tokenAddress, timestamps, network = "main
             }
         } catch (error) {
             const status = Number(error?.status ?? 0)
-            console.warn("Token P&L v15 DEFILLAMA PRICE FAILED", { network, token, coinId, status })
+            console.debug("Token P&L v15 DEFILLAMA PRICE FAILED", { network, token, coinId, status })
             if ([400, 401, 403, 404, 429].includes(status)) {
                 markProviderFailure("defillama", network, token, status)
             }
@@ -970,7 +970,7 @@ const prefetchCoinGeckoPrices = async (tokenAddress, timestamps, network = "main
             json = await fetchJsonWithRetry(url, { attempts: 2, delay: 1800, timeout: 20000 })
         } catch (error) {
             const status = Number(error?.status ?? 0)
-            console.warn("Token P&L v15 COINGECKO PRICE FAILED", { network, token, year, status })
+            console.debug("Token P&L v15 COINGECKO PRICE FAILED", { network, token, year, status })
             if ([400, 401, 403, 404, 429].includes(status)) {
                 markProviderFailure("coingecko", network, token, status)
             }
@@ -1083,7 +1083,7 @@ const prefetchHistoricalTokenPrices = async (tokenAddress, timestamps, network =
         try {
             json = await fetchJsonWithRetry(url, { attempts: 3, delay: 2000, timeout: 15000 })
         } catch (error) {
-            console.warn("Token P&L v15 BATCH PRICE FAILED", {
+            console.debug("Token P&L v15 BATCH PRICE FAILED", {
                 network, token, status: error?.status ?? null, requestCount
             })
             if ([401, 403, 429].includes(Number(error?.status))) {
@@ -1433,7 +1433,7 @@ export default function useTokenPnl({
                 transferDateBasisCount: 0, actualSpendBasisCount: 0,
                 allocatedSpendBasisCount: 0, zeroBasisAcquisitionCount: 0,
                 internalTransferBasisCount: 0, stakedUnits: 0, stakedCostBasisUsd: 0,
-                unknownDisposedUnits: 0, lastEventTimestamp: null
+                stakeEstimatedBasisUnits: 0, unknownDisposedUnits: 0, lastEventTimestamp: null
             }
             const summed = parts.reduce((acc, p) => {
                 for (const key of [
@@ -1442,7 +1442,7 @@ export default function useTokenPnl({
                     "transferDateBasisCount", "actualSpendBasisCount",
                     "allocatedSpendBasisCount", "zeroBasisAcquisitionCount",
                     "internalTransferBasisCount", "stakedUnits", "stakedCostBasisUsd",
-                    "unknownDisposedUnits"
+                    "stakeEstimatedBasisUnits", "unknownDisposedUnits"
                 ]) acc[key] += Number(p?.[key] ?? 0)
                 acc.lastEventTimestamp = Math.max(Number(acc.lastEventTimestamp ?? 0), Number(p?.lastEventTimestamp ?? 0)) || null
                 return acc
@@ -1970,7 +1970,7 @@ export default function useTokenPnl({
                 // independently. Visibility is only an aggregation filter; switching
                 // between one wallet, several wallets, or all wallets never changes
                 // the historical cache key and never requires re-fetching history.
-                const WALLET_TOKEN_CACHE_VERSION = 41
+                const WALLET_TOKEN_CACHE_VERSION = 42
                 const getWalletTokenCacheKey = (wallet, token) =>
                     `token_pnl_wallet_v${WALLET_TOKEN_CACHE_VERSION}:${wallet}:${token}`
                 const readWalletTokenCache = (wallet, token) => {
@@ -2037,7 +2037,7 @@ export default function useTokenPnl({
                     transferDateBasisCount: 0, actualSpendBasisCount: 0,
                     allocatedSpendBasisCount: 0, zeroBasisAcquisitionCount: 0,
                     internalTransferBasisCount: 0,
-                    stakedUnits: 0, stakedCostBasisUsd: 0,
+                    stakedUnits: 0, stakedCostBasisUsd: 0, stakeEstimatedBasisUnits: 0,
                     unknownDisposedUnits: 0, lastEventTimestamp: null
                 })
 
@@ -2307,17 +2307,88 @@ export default function useTokenPnl({
                                 if (Number.isFinite(delta) && delta > 0) {
                                     position.lastEventTimestamp = event.timestamp
                                     if (targetToken === HEX_ADDRESS && method.includes("stakestart")) {
-                                        // Staking is not a sale. Move the liquid HEX basis
-                                        // into a separate active-stake bucket so the miner
-                                        // DCA can use the basis actually carried into stakes.
-                                        const accounted = Math.min(delta, Math.max(0, position.units))
-                                        const avg = position.units > 0 ? position.costBasisUsd / position.units : 0
-                                        const carriedBasis = Number.isFinite(avg) && avg >= 0 ? avg * accounted : 0
-                                        position.costBasisUsd = Math.max(0, position.costBasisUsd - carriedBasis)
-                                        position.units = Math.max(0, position.units - accounted)
-                                        position.stakedUnits += accounted
-                                        position.stakedCostBasisUsd += carriedBasis
-                                        if (delta > accounted) position.unknownDisposedUnits += delta - accounted
+                                        // V42: staking is not a disposal. Older explorer history can
+                                        // omit HEX that was already present before a stakeStart
+                                        // (especially around the Ethereum -> PulseChain snapshot).
+                                        //
+                                        // Previously we only moved the portion covered by the
+                                        // reconstructed liquid ledger into the stake bucket. That
+                                        // permanently lost the rest of the stake principal, so a
+                                        // later stakeEnd could not restore its basis to liquid HEX.
+                                        //
+                                        // Carry exact reconstructed basis first. For any uncovered
+                                        // principal, prefer this wallet's existing weighted HEX entry
+                                        // when available; otherwise use HEX's historical market price
+                                        // on the stakeStart date as an explicitly estimated basis.
+                                        const availableUnits = Math.max(0, position.units)
+                                        const accounted = Math.min(delta, availableUnits)
+                                        const liquidAvg =
+                                            availableUnits > 0 && position.costBasisUsd > 0
+                                                ? position.costBasisUsd / availableUnits
+                                                : 0
+                                        const carriedBasis =
+                                            Number.isFinite(liquidAvg) && liquidAvg > 0
+                                                ? liquidAvg * accounted
+                                                : 0
+
+                                        const missingStakeUnits = Math.max(0, delta - accounted)
+                                        let estimatedMissingBasis = 0
+                                        let missingBasisPrice = null
+                                        let missingBasisMethod = null
+
+                                        if (missingStakeUnits > 0) {
+                                            if (Number.isFinite(liquidAvg) && liquidAvg > 0) {
+                                                missingBasisPrice = liquidAvg
+                                                missingBasisMethod = "wallet-weighted-entry"
+                                            } else {
+                                                const historicalHexPrice =
+                                                    await getHistoricalPrice(
+                                                        HEX_ADDRESS,
+                                                        event.timestamp,
+                                                        event.network
+                                                    )
+                                                if (
+                                                    Number.isFinite(historicalHexPrice) &&
+                                                    historicalHexPrice > 0
+                                                ) {
+                                                    missingBasisPrice = historicalHexPrice
+                                                    missingBasisMethod = "stake-start-market-estimate"
+                                                }
+                                            }
+
+                                            if (
+                                                Number.isFinite(missingBasisPrice) &&
+                                                missingBasisPrice > 0
+                                            ) {
+                                                estimatedMissingBasis =
+                                                    missingStakeUnits * missingBasisPrice
+                                                position.stakeEstimatedBasisUnits =
+                                                    Number(position.stakeEstimatedBasisUnits ?? 0) +
+                                                    missingStakeUnits
+                                                position.transferDateBasisCount +=
+                                                    missingBasisMethod === "stake-start-market-estimate"
+                                                        ? 1
+                                                        : 0
+                                            } else {
+                                                // Preserve the units even when pricing fails. This
+                                                // keeps stakeStart/stakeEnd accounting balanced, but
+                                                // marks the wallet incomplete so the UI will not
+                                                // silently present an unsupported P&L.
+                                                position.unpricedAcquisitionCount += 1
+                                            }
+                                        }
+
+                                        position.costBasisUsd =
+                                            Math.max(0, position.costBasisUsd - carriedBasis)
+                                        position.units =
+                                            Math.max(0, position.units - accounted)
+
+                                        // The full stake principal is now tracked, not only the
+                                        // portion that happened to exist in explorer history.
+                                        position.stakedUnits += delta
+                                        position.stakedCostBasisUsd +=
+                                            carriedBasis + estimatedMissingBasis
+
                                     } else {
                                         position.disposalCount += 1
                                         if (position.units > 0) {
@@ -2424,7 +2495,7 @@ export default function useTokenPnl({
                             const combinedCurrentUnits = Number(currentBalances?.[wallet]?.balances?.[targetToken]?.normalized ?? 0)
                             let nativeCurrentUnits = 0
                             try {
-                                nativeCurrentUnits = Number(ethers.formatUnits(String(currentBalances?.[wallet]?.balances?.PLS?.raw ?? '0'), 18))
+                                nativeCurrentUnits = Number(ethers.utils.formatUnits(String(currentBalances?.[wallet]?.balances?.PLS?.raw ?? '0'), 18))
                             } catch {}
                             const wrappedCurrentUnits = Math.max(0, combinedCurrentUnits - nativeCurrentUnits)
                             const missingUnits = Number.isFinite(wrappedCurrentUnits) ? Math.max(0, wrappedCurrentUnits - position.units) : 0
@@ -2440,7 +2511,7 @@ export default function useTokenPnl({
                                             const from = normalizeAddress(tx?.from?.hash ?? tx?.from)
                                             const methodName = String(tx?.method ?? tx?.decoded_input?.method_call ?? "").toLowerCase()
                                             const input = String(tx?.raw_input ?? tx?.input ?? "").toLowerCase()
-                                            const value = Number(ethers.formatEther(String(tx?.value ?? "0")))
+                                            const value = Number(ethers.utils.formatEther(String(tx?.value ?? "0")))
                                             // Any native-value transaction from this wallet to the
                                             // canonical WPLS contract is a wrap. Explorer method labels
                                             // are inconsistent on older PulseChain transactions, so do
@@ -2450,7 +2521,7 @@ export default function useTokenPnl({
                                             hash: String(tx?.hash ?? "").toLowerCase(),
                                             timestamp: toUnixSeconds(tx?.timestamp),
                                             blockNumber: Number(tx?.block_number ?? 0),
-                                            units: Number(ethers.formatEther(String(tx?.value ?? "0")))
+                                            units: Number(ethers.utils.formatEther(String(tx?.value ?? "0")))
                                         })).filter(x => x.timestamp > 0 && x.units > 0)
                                         wrapCache = writeWplsWrapCache(wallet, { complete: true, deposits })
                                     } catch (error) {
@@ -2502,7 +2573,7 @@ export default function useTokenPnl({
                                             const to = normalizeAddress(tx?.to?.hash ?? tx?.to)
                                             const raw = String(tx?.value ?? '0')
                                             let units = 0
-                                            try { units = Number(ethers.formatEther(raw)) } catch {}
+                                            try { units = Number(ethers.utils.formatEther(raw)) } catch {}
                                             if (!(Number.isFinite(units) && units > 0)) return
                                             const hash = String(tx?.transaction_hash ?? tx?.transaction?.hash ?? tx?.hash ?? '').toLowerCase()
                                             const timestamp = toUnixSeconds(tx?.timestamp ?? tx?.timeStamp)
@@ -2613,7 +2684,7 @@ export default function useTokenPnl({
                             let actualCombinedUnits = 0
                             try {
                                 const rawCombined = String(currentBalances?.[wallet]?.balances?.[WPLS_ADDRESS]?.raw ?? '0')
-                                actualCombinedUnits = Number(ethers.formatUnits(rawCombined, 18))
+                                actualCombinedUnits = Number(ethers.utils.formatUnits(rawCombined, 18))
                             } catch {
                                 actualCombinedUnits = Number(currentBalances?.[wallet]?.balances?.[WPLS_ADDRESS]?.normalized ?? 0)
                             }
@@ -2668,17 +2739,38 @@ export default function useTokenPnl({
                     }
 
                     if (targetToken === HEX_ADDRESS || targetToken === WPLS_ADDRESS) {
-                        console.info(`Token P&L v41 ${targetToken === HEX_ADDRESS ? "HEX" : "PLS+WPLS"} WALLET LEDGERS`, JSON.stringify(
-                            Object.fromEntries(allWalletAddresses.map(wallet => [wallet, {
-                                units: Number(finalPerWallet[wallet]?.units ?? 0),
+                        const ledgerDiagnostics = Object.fromEntries(allWalletAddresses.map(wallet => {
+                            const reconstructedUnits = Number(finalPerWallet[wallet]?.units ?? 0)
+                            const currentUnits = Number(currentBalances?.[wallet]?.balances?.[targetToken]?.normalized ?? 0)
+                            const coverage =
+                                currentUnits > 0 && reconstructedUnits > 0
+                                    ? Math.min(reconstructedUnits / currentUnits, currentUnits / reconstructedUnits)
+                                    : 0
+
+                            return [wallet, {
+                                currentUnits,
+                                reconstructedUnits,
+                                coveragePercent: Number((coverage * 100).toFixed(4)),
                                 costBasisUsd: Number(finalPerWallet[wallet]?.costBasisUsd ?? 0),
                                 averageEntry: Number(finalPerWallet[wallet]?.averageEntry ?? 0),
                                 stakedUnits: Number(finalPerWallet[wallet]?.stakedUnits ?? 0),
                                 stakedCostBasisUsd: Number(finalPerWallet[wallet]?.stakedCostBasisUsd ?? 0),
-                                unpriced: Number(finalPerWallet[wallet]?.unpricedAcquisitionCount ?? 0),
-                                complete: finalPerWallet[wallet]?.complete !== false
-                            }]))
-                        ))
+                                stakeEstimatedBasisUnits: Number(finalPerWallet[wallet]?.stakeEstimatedBasisUnits ?? 0),
+                                pricedAcquisitions: Number(finalPerWallet[wallet]?.pricedAcquisitionCount ?? 0),
+                                unpricedAcquisitions: Number(finalPerWallet[wallet]?.unpricedAcquisitionCount ?? 0),
+                                unknownDisposedUnits: Number(finalPerWallet[wallet]?.unknownDisposedUnits ?? 0),
+                                complete: finalPerWallet[wallet]?.complete !== false,
+                                basisMethod: finalPerWallet[wallet]?.basisMethod ?? null
+                            }]
+                        }))
+
+                        // WARNING level on purpose: packaged Electron builds can hide INFO
+                        // messages depending on DevTools' level/filter settings.
+                        console.warn(
+                            `========== ${targetToken === HEX_ADDRESS ? "HEX" : "PLS+WPLS"} P&L WALLET DIAGNOSTICS ==========\n` +
+                            JSON.stringify(ledgerDiagnostics, null, 2) +
+                            `\n========== END ${targetToken === HEX_ADDRESS ? "HEX" : "PLS+WPLS"} P&L WALLET DIAGNOSTICS ==========`
+                        )
                     }
 
                     if (targetToken === PRVX_ADDRESS) {
@@ -2761,5 +2853,5 @@ export default function useTokenPnl({
         return () => { cancelled = true }
     }, [walletKey, tokenKey, settings, enabled])
 
-    return { positions, loading, activeTokens, progress, errors }
+    return { positions, walletPositions, loading, activeTokens, progress, errors }
 }

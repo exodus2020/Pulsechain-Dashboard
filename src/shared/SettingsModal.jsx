@@ -179,6 +179,38 @@ function SettingsModal({ context }) {
     }
   }
 
+  const handleClearDataCache = () => {
+    const confirmed = window.confirm(
+      'Clear cached DCA, P&L, historical-price, transaction, and chart data?\n\nYour wallets, settings, password, watchlist, and configuration will be preserved.'
+    )
+
+    if (!confirmed) return
+
+    const cachePrefixes = [
+      'hex_dca_',
+      'token_pnl_',
+      'token-pnl:',
+      'pls_candles_'
+    ]
+
+    try {
+      const keysToRemove = []
+      for (let i = 0; i < window.localStorage.length; i += 1) {
+        const storageKey = window.localStorage.key(i)
+        if (storageKey && cachePrefixes.some(prefix => storageKey.startsWith(prefix))) {
+          keysToRemove.push(storageKey)
+        }
+      }
+
+      keysToRemove.forEach(storageKey => window.localStorage.removeItem(storageKey))
+      console.log('[CACHE] cleared analytics data', { removed: keysToRemove.length })
+      window.location.reload()
+    } catch (error) {
+      console.error('[CACHE] failed to clear analytics data', error)
+      window.alert('Unable to clear the data cache. See the console for details.')
+    }
+  }
+
   const handleExportData = async () => {
     const dataToExport = await window.electron.loadFile('config.json')
     const blob = new Blob([dataToExport], { type: 'text/plain' });
@@ -290,7 +322,14 @@ function SettingsModal({ context }) {
               />
             </label>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '0px 40px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '0px 40px' }}>
+          <Button
+            onClick={handleClearDataCache}
+            textAlign="center"
+            style={{ background: 'rgb(70,70,70)', color: 'white' }}
+          >
+            Clear Data Cache
+          </Button>
           <div>
             <div>
               <Button onClick={() => {

@@ -108,21 +108,57 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
     const exactCoverage = reconstructionCoverage >= 0.98
     const estimateCoverage = reconstructionCoverage >= 0.50
 
+    // V43: HEX can have a large state-derived history gap even after a complete
+    // explorer scan (fork-copied state / legacy stake bookkeeping). If the
+    // wallet's reconstructed sample is substantial, fully priced, and the scan
+    // itself is complete, use that wallet's own weighted historical entry as an
+    // explicitly labelled estimate rather than leaving P&L permanently N/A.
+    //
+    // This does not invent a market price. It extrapolates the average basis
+    // already reconstructed from the wallet's real priced HEX history.
+    const isHex = String(tokenAddress ?? '').toLowerCase() === HEX_ADDRESS
+    const hasSubstantialHexSample =
+        isHex &&
+        tokenPnl?.complete === true &&
+        Number(tokenPnl?.unpricedAcquisitionCount ?? 0) === 0 &&
+        reconstructedUnits >= 1_000_000 &&
+        reconstructionCoverage >= 0.25 &&
+        Number.isFinite(averageEntry) &&
+        averageEntry > 0
+
     // For HEX specifically, an active-stake ledger gives us an independent,
     // amount-weighted entry estimate even if explorer indexing left the liquid
-    // ledger short. Use it only as a fallback for the liquid watchlist row.
+    // ledger short. Prefer it when available.
     const canUseHexStakeFallback =
-        String(tokenAddress ?? '').toLowerCase() === HEX_ADDRESS &&
+        isHex &&
         Number.isFinite(stakeAverageEntry) && stakeAverageEntry > 0
 
-    const effectiveAverageEntry =
-        Number.isFinite(averageEntry) && averageEntry > 0 && (exactCoverage || estimateCoverage)
-            ? averageEntry
-            : canUseHexStakeFallback
-                ? stakeAverageEntry
+    const hasNormalLiquidEntry =
+        Number.isFinite(averageEntry) &&
+        averageEntry > 0 &&
+        (exactCoverage || estimateCoverage)
+
+    const effectiveAverageEntry = hasNormalLiquidEntry
+        ? averageEntry
+        : canUseHexStakeFallback
+            ? stakeAverageEntry
+            : hasSubstantialHexSample
+                ? averageEntry
                 : null
-    const usedStakeFallback = !((Number.isFinite(averageEntry) && averageEntry > 0) && (exactCoverage || estimateCoverage)) && canUseHexStakeFallback
-    const usedPartialEstimate = !exactCoverage && Number.isFinite(effectiveAverageEntry) && effectiveAverageEntry > 0
+
+    const usedStakeFallback =
+        !hasNormalLiquidEntry &&
+        canUseHexStakeFallback
+
+    const usedLiquidLedgerFallback =
+        !hasNormalLiquidEntry &&
+        !canUseHexStakeFallback &&
+        hasSubstantialHexSample
+
+    const usedPartialEstimate =
+        !exactCoverage &&
+        Number.isFinite(effectiveAverageEntry) &&
+        effectiveAverageEntry > 0
 
     const hasPositiveBasis =
         Number.isFinite(effectiveAverageEntry) &&
