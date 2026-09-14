@@ -49,7 +49,7 @@ View reconstructed average entry, cost basis, current value, and estimated P&L u
 <img src="public/Screenshots/2.3.0/HEX%20Miners%20Dashboard.png" width="500" alt="HEX Miner Analytics Dashboard">
 </td>
 <td align="center">
-<img src="public/Screenshots/2.3.0/Multiple%20Wallet%20Tracking%281%29.png" width="500" alt="Multiple Wallet Tracking">
+<img src="public/Screenshots/2.3.0/Multiple%20Wallet%20Tracking.png" width="500" alt="Multiple Wallet Tracking">
 </td>
 </tr>
 
