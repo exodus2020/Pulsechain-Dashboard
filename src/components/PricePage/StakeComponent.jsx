@@ -58,12 +58,14 @@ const Wrapper = styled.div`
 `
 
 const Row = styled.div`
+    border: 1px solid ${props => props.$scenario ? 'rgba(227, 184, 92, .65)' : 'transparent'};
+    background: ${props => props.$scenario ? 'linear-gradient(to bottom, rgba(227, 184, 92, 0.12), rgba(227, 184, 92, 0.035))' : 'transparent'};
+    box-shadow: ${props => props.$scenario ? '0 0 12px rgba(227, 184, 92, .10), 0 1px 4px rgba(255, 255, 255, 0.1)' : '0 1px 4px rgba(255, 255, 255, 0.1)'};
     width: 100%;
     height: 100%;
     min-height: 100px;
     box-sizing: border-box;
     text-align: center;
-    box-shadow: 0 1px 4px rgba(255, 255, 255, 0.1);
     padding: 12px 8px;
     border-radius: 10px;
     position: relative;
@@ -78,7 +80,7 @@ const Row = styled.div`
     }
 `
 
-export function StakeComponent({hexData, hexDcaData, hexTokenPnl, hexWalletPositions = {}, walletBalances = {}, hexPrice, hiddenWallets, disabled, visibleWallets, liquidHexUnits = 0}) {
+export function StakeComponent({hexData, hexDcaData, hexTokenPnl, hexWalletPositions = {}, walletBalances = {}, hexPrice, hiddenWallets, disabled, visibleWallets, liquidHexUnits = 0, scenarioEnabled = false}) {
 
     const formatTShares = (tShares) => hexData.stats.totalTShares < 100 ? tShares.toFixed(3) : `${fUnit(tShares, 2)}`
     const formatLength = (length) => length < 364 ? `${length}d` : `${parseFloat(length / 365).toFixed(2)}y`
@@ -920,7 +922,7 @@ const fitPnlFontSize = value => {
     return <Wrapper>
         <div style={disabled ? { color: 'rgb(120,120,120)', opacity: 0.5 } : {}}>
             <div className="hex-title">
-                HEX Miners ({stats?.totalStakes ?? 0}) • <span style={{ letterSpacing: 1 }}> $ { addCommasToNumber(parseFloat( parseFloat(hexBalanceUsd ?? 0)).toFixed(2)) }</span>
+                HEX Miners ({stats?.totalStakes ?? 0}) • <span style={{ letterSpacing: 1, color: scenarioEnabled ? 'rgb(240,205,130)' : undefined }}> $ { addCommasToNumber(parseFloat( parseFloat(hexBalanceUsd ?? 0)).toFixed(2)) }</span>{scenarioEnabled ? <span style={{ marginLeft: 8, fontSize: 10, color: 'rgb(240,205,130)', letterSpacing: .5 }}>SCENARIO</span> : null}
                 <div style={{ position: 'absolute', top: '0', right: '0' }} className="mute">
                     <br className="mobile-only"/>
                     {totalStakes === 0 ? 'No Stakes' : activeStakes === 0 ? 'No Active Stakes' :(stats?.daysUntilNextStake ?? 0) < 0 
@@ -945,7 +947,7 @@ const fitPnlFontSize = value => {
                     </Row>
                 </Tooltip>
                 <Tooltip content={<div style={{ textAlign: 'center' }}>$ {addCommasToNumber(parseFloat(stakedHexUsd ?? 0).toFixed(2))}<br/><br/>{addCommasToNumber(parseFloat(stakedHex ?? 0).toFixed(0))} HEX</div>}>
-                    <Row>
+                    <Row $scenario={scenarioEnabled}>
                         <div style={{ fontSize: 20, textAlign: 'center', width: '100%' }}>Principal</div>
                         <div style={{ fontSize: 28, marginTop: 6, position: 'relative', textAlign: 'center' }}>
                             $ {fUnit( stakedHexUsd ?? 0, 1 )}
@@ -958,7 +960,7 @@ const fitPnlFontSize = value => {
                     </Row>
                 </Tooltip>
                                 <Tooltip content={<div style={{ textAlign: 'center' }}>$ {addCommasToNumber(parseFloat(hexYieldUsd ?? 0).toFixed(2))}<br/><br/>{addCommasToNumber(parseFloat(hexYield ?? 0).toFixed(0))} HEX</div>}>
-                    <Row>
+                    <Row $scenario={scenarioEnabled}>
                         <div style={{ fontSize: 20, textAlign: 'center', width: '100%' }}>Mined</div>
                         <div style={{ fontSize: 28, marginTop: 6, position: 'relative', textAlign: 'center' }}>
                             $ {fUnit( hexYieldUsd ?? 0, 1 )}
@@ -1015,7 +1017,7 @@ const fitPnlFontSize = value => {
 
                 <Tooltip
                     content={<div style={{ textAlign: "center" }}>
-                        Estimated P&amp;L on historically priced HEX purchases at the current HEX price.<br/><br/>
+                        Estimated P&amp;L on historically priced HEX purchases at the {scenarioEnabled ? 'scenario' : 'current'} HEX price.<br/><br/>
                         Current value: $ {addCommasToNumber(dcaCurrentValue.toFixed(2))}<br/>
                         Cost basis: $ {addCommasToNumber(Number(effectiveDcaBasis ?? 0).toFixed(2))}
                         {usesReconstructedDca
@@ -1026,7 +1028,7 @@ const fitPnlFontSize = value => {
                     </div>}
                     placement="right"
                 >
-                    <Row>
+                    <Row $scenario={scenarioEnabled}>
                         <div style={{ fontSize: 20, textAlign: "center", width: "100%" }}>P&amp;L</div>
                         <div style={{
                             marginTop: 6,

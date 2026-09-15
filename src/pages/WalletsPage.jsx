@@ -21,6 +21,7 @@ import { parseHexStats } from "../lib/hex"
 import useFilterBalance from "../hooks/useFilterBalance"
 import PricesComponentV2 from "../components/PricesComponentV2"
 import HexComponent from "../components/HexComponent"
+import ScenarioPanel, { SCENARIO_CORE_TOKENS } from "../components/PricePage/ScenarioPanel"
 
 const Wrapper = styled.div`
     color: white;
@@ -198,6 +199,45 @@ function WalletsPage ({
         }
     })
 
+    const [ scenarioEnabled, setScenarioEnabled ] = useState(false)
+    const [ scenarioMultiplier, setScenarioMultiplier ] = useState('')
+    const [ scenarioManualPrices, setScenarioManualPrices ] = useState({})
+
+    // Built-in, read-only scenario shipped with the app. These are USD all-time-high
+    // prices recorded for the PulseChain versions of the core assets. Keeping this
+    // scenario in code guarantees every install has it, even after localStorage is
+    // cleared, while user-created scenarios remain local and editable.
+    const ATH_SCENARIO = {
+        name: 'ATH',
+        multiplier: '',
+        locked: true,
+        builtIn: true,
+        targetPrices: {
+            '0xa1077a294dde1b09bb078844df40758a5d0f9a27': '0.0003206',
+            '0x95b303987a60c71504d99aa1b13b4da07b0790ab': '0.0001392',
+            '0x2b591e99afe9f32eaa6214f7b7629768c40eeb39': '0.04079',
+            '0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d': '10.19',
+            '0xf6f8db0aba00007681f8faf16a0fda1c9b030b11': '0.0001384'
+        }
+    }
+
+    const [ savedScenarios, setSavedScenarios ] = useState(() => {
+        try {
+            const parsed = JSON.parse(localStorage.getItem('pulseSavedScenarios') || '[]')
+            const userScenarios = (Array.isArray(parsed) ? parsed : [])
+                .filter(item => String(item?.name ?? '').toLowerCase() !== 'ath')
+            return [ATH_SCENARIO, ...userScenarios]
+        } catch {
+            return [ATH_SCENARIO]
+        }
+    })
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('pulseSavedScenarios', JSON.stringify(savedScenarios))
+        } catch {}
+    }, [savedScenarios])
+
     const priceArray = Object.keys(prices)
     const pricesLoaded = priceArray.length > 0
 
@@ -227,7 +267,6 @@ function WalletsPage ({
         0
     )
 
-    const incUsdPerDay = incPerDay * incPriceUsd
 
     const walletAddresses = Object.keys(data?.wallets ?? {})
         .map(address => address.toLowerCase())
@@ -251,6 +290,163 @@ function WalletsPage ({
     const grandTotal = allWalletsHidden
         ? '0.00'
         : parseFloat(calculatedGrandTotal).toFixed(2)
+
+    const scenarioPriceFor = (address) => {
+        const key = String(address ?? '').toLowerCase()
+        const livePrice = Number(prices?.[key]?.priceUsd ?? prices?.[address]?.priceUsd ?? 0)
+        if (!scenarioEnabled || !Number.isFinite(livePrice) || livePrice <= 0) return livePrice
+
+        const manual = Number(scenarioManualPrices?.[key])
+        if (String(scenarioManualPrices?.[key] ?? '').trim() !== '' && Number.isFinite(manual) && manual >= 0) {
+            return manual
+        }
+
+        const multiplier = Number(scenarioMultiplier)
+        if (String(scenarioMultiplier ?? '').trim() !== '' && Number.isFinite(multiplier) && multiplier >= 0) {
+            return livePrice * multiplier
+        }
+
+        return livePrice
+    }
+
+    const isScenarioCoreToken = (address) => {
+        const key = String(address ?? '').toLowerCase()
+        return SCENARIO_CORE_TOKENS.some(token => token.address === key)
+    }
+
+    const incUsdPerDay = incPerDay * (scenarioEnabled ? scenarioPriceFor('0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d') : incPriceUsd)
+
+    const scenarioPositionUsd = (position, token0Address, token1Address, includeRewards = false) => {
+        const tokenValue = (leg, address) => {
+            const liveUsd = Number(leg?.usd ?? 0)
+            const units = Number(leg?.normalized ?? 0)
+            const key = String(address ?? '').toLowerCase()
+            if (!scenarioEnabled || !isScenarioCoreToken(key)) return liveUsd
+            const simulated = Number(scenarioPriceFor(key))
+            return Number.isFinite(units) && Number.isFinite(simulated) ? units * simulated : liveUsd
+        }
+
+        let total = tokenValue(position?.token0, token0Address) + tokenValue(position?.token1, token1Address)
+        if (includeRewards) {
+            const incAddress = '0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d'
+            const rewardUnits = Number(position?.rewards?.normalized ?? 0)
+            const rewardLiveUsd = Number(position?.rewards?.usd ?? 0)
+            const rewardPrice = Number(scenarioPriceFor(incAddress))
+            total += scenarioEnabled && Number.isFinite(rewardUnits) && Number.isFinite(rewardPrice)
+                ? rewardUnits * rewardPrice
+                : rewardLiveUsd
+        }
+        return total
+    }
+
+    const scenarioAddressBalances = useMemo(() => {
+        if (!scenarioEnabled) return Number(addressBalances ?? 0)
+
+        // Rebuild the liquid-token total directly from the visible token positions.
+        // Do not start with addressBalances and apply a price delta: addressBalances.usd
+        // can briefly reflect an older price refresh than the live `prices` object. When
+        // changing from a high scenario multiple to a lower one that mismatch caused a
+        // transient double-count/overshoot in the jumbo portfolio total. Core tokens are
+        // valued directly at their scenario target price; every other token keeps its
+        // already-computed live USD value.
+        const total = Object.entries(addressData ?? {}).reduce((sum, [address, position]) => {
+            const key = String(address ?? '').toLowerCase()
+            const liveUsd = Number(position?.usd ?? 0)
+
+            if (!isScenarioCoreToken(key)) {
+                return sum + (Number.isFinite(liveUsd) ? liveUsd : 0)
+            }
+
+            const units = Number(position?.normalized ?? 0)
+            const simulatedPrice = Number(scenarioPriceFor(key))
+            const scenarioUsd = Number.isFinite(units) && Number.isFinite(simulatedPrice)
+                ? units * simulatedPrice
+                : liveUsd
+
+            return sum + (Number.isFinite(scenarioUsd) ? scenarioUsd : 0)
+        }, 0)
+
+        return Math.max(0, total)
+    }, [scenarioEnabled, scenarioMultiplier, scenarioManualPrices, addressBalances, addressData, prices])
+
+    const scenarioHexPriceUsd = scenarioEnabled
+        ? scenarioPriceFor('0x2b591e99afe9f32eaa6214f7b7629768c40eeb39')
+        : hexPrice
+
+    const scenarioStakesUsdValue = Number(stakeStats?.totalFinalHex ?? 0) * Number(scenarioHexPriceUsd ?? 0)
+
+    const scenarioAddressFarms = useMemo(() => {
+        if (!scenarioEnabled) return Number(addressFarms ?? 0)
+        return Object.values(farm ?? {}).reduce((total, position) => {
+            return total + scenarioPositionUsd(position, position?.token0Address, position?.token1Address, true)
+        }, 0)
+    }, [scenarioEnabled, scenarioMultiplier, scenarioManualPrices, addressFarms, farm, prices])
+
+    const scenarioAddressLps = useMemo(() => {
+        if (!scenarioEnabled) return Number(addressLps ?? 0)
+        return Object.values(lps ?? {}).reduce((total, position) => {
+            return total + scenarioPositionUsd(position, position?.token0Address, position?.token1Address, false)
+        }, 0)
+    }, [scenarioEnabled, scenarioMultiplier, scenarioManualPrices, addressLps, lps, prices])
+
+    const scenarioGrandTotal = scenarioEnabled
+        ? (allWalletsHidden
+            ? 0
+            : Math.max(0,
+                Number(hideHexMiners ? 0 : scenarioStakesUsdValue) +
+                Number(scenarioAddressBalances ?? 0) +
+                Number(scenarioAddressFarms ?? 0) +
+                Number(scenarioAddressLps ?? 0)
+            ))
+        : Number(grandTotal ?? 0)
+
+    const resetScenario = () => {
+        setScenarioMultiplier('')
+        setScenarioManualPrices({})
+    }
+
+    const saveScenario = (name, targetPrices, multiplier = '') => {
+        const trimmedName = String(name ?? '').trim()
+        if (!trimmedName) return false
+        // ATH is a protected built-in preset and cannot be overwritten.
+        if (trimmedName.toLowerCase() === 'ath') return false
+
+        const normalizedTargets = SCENARIO_CORE_TOKENS.reduce((acc, { address }) => {
+            const value = Number(targetPrices?.[address])
+            if (Number.isFinite(value) && value >= 0) acc[address] = String(value)
+            return acc
+        }, {})
+
+        const nextScenario = {
+            name: trimmedName,
+            multiplier: String(multiplier ?? ''),
+            targetPrices: normalizedTargets,
+            updatedAt: Date.now()
+        }
+
+        setSavedScenarios(prev => {
+            const withoutSameName = (prev ?? []).filter(item => String(item?.name ?? '').toLowerCase() !== trimmedName.toLowerCase())
+            return [...withoutSameName, nextScenario].sort((a, b) => String(a.name).localeCompare(String(b.name)))
+        })
+        return true
+    }
+
+    const loadScenario = (name) => {
+        const found = (savedScenarios ?? []).find(item => item?.name === name)
+        if (!found) return false
+        setScenarioMultiplier(String(found?.multiplier ?? ''))
+        setScenarioManualPrices({ ...(found?.targetPrices ?? {}) })
+        setScenarioEnabled(true)
+        return true
+    }
+
+    const deleteScenario = (name) => {
+        setSavedScenarios(prev => {
+            const target = (prev ?? []).find(item => item?.name === name)
+            if (target?.locked || String(name ?? '').toLowerCase() === 'ath') return prev
+            return (prev ?? []).filter(item => item?.name !== name)
+        })
+    }
 
     const tokenUsdValue = (address) => {
         const key = address.toLowerCase()
@@ -550,7 +746,9 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
             <div style={{ position: 'relative' }}>
                 <PriceJumbo
                     key={`jumbo-${hiddenWallets.join('-')}-${hideHexMiners}`}
-                    balance={grandTotal}
+                    balance={scenarioEnabled ? scenarioGrandTotal : grandTotal}
+                    liveBalance={grandTotal}
+                    scenarioEnabled={scenarioEnabled}
                     wallets={data?.wallets} 
                     loading={loading} 
                     isFiltered={hiddenWallets.length > 0} 
@@ -558,7 +756,7 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                     bestStable={priceData?.bestStable}
                 />
 
-                {!allWalletsHidden && (
+                {!allWalletsHidden && !scenarioEnabled && (
                     <div style={{
                         textAlign: 'center',
                         marginTop: -32,
@@ -600,6 +798,20 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                         </Button>
                     </Tooltip>}
                 </div>
+                <Tooltip content={scenarioEnabled ? 'Exit Scenario Mode' : 'Test hypothetical token prices'}>
+                    <Button
+                        parentStyle={{ width: 110, display: 'inline-block', marginRight: 5 }}
+                        textAlign={'center'}
+                        onClick={() => setScenarioEnabled(!scenarioEnabled)}
+                        style={scenarioEnabled ? {
+                            border: '1px solid rgba(227, 184, 92, .85)',
+                            background: 'rgba(227, 184, 92, .12)',
+                            color: 'rgb(240,205,130)'
+                        } : undefined}
+                    >
+                        {scenarioEnabled ? 'Scenario ON' : 'Scenario'}
+                    </Button>
+                </Tooltip>
                 <Tooltip content="Manage Wallet Addresses">
                     <Button parentStyle={{ width: 75, display: 'inline-block', marginRight: 5 }} textAlign={'center'} onClick={() => setWalletModal(true)}>
                         Wallets
@@ -616,7 +828,21 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                     </Button>
                 </Tooltip>
             </div>
-            <div style={{ marginTop: 70, marginBottom: 50 }}>
+            {scenarioEnabled && (
+                <ScenarioPanel
+                    multiplier={scenarioMultiplier}
+                    setMultiplier={setScenarioMultiplier}
+                    manualPrices={scenarioManualPrices}
+                    setManualPrices={setScenarioManualPrices}
+                    prices={prices}
+                    onReset={resetScenario}
+                    savedScenarios={savedScenarios}
+                    onSaveScenario={saveScenario}
+                    onLoadScenario={loadScenario}
+                    onDeleteScenario={deleteScenario}
+                />
+            )}
+            <div style={{ marginTop: scenarioEnabled ? 58 : 70, marginBottom: 50 }}>
                 <PricesComponentV2
                     historyData={historyData}
                     priceData={priceData}
@@ -625,14 +851,14 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                 />
             </div>
             {hasHexStakes ? <div>
-                <StakeComponent visibleWallets={visibleWallets} disabled={hideHexMiners} hexData={hexData} hexDcaData={hexDcaData} hexTokenPnl={tokenPnlData?.positions?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} hexWalletPositions={tokenPnlData?.walletPositions ?? {}} walletBalances={balances ?? {}} hexPrice={prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} hiddenWallets={hiddenWallets} liquidHexUnits={Number(addressData?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']?.normalized ?? 0)}/>
+                <StakeComponent visibleWallets={visibleWallets} disabled={hideHexMiners} hexData={hexData} hexDcaData={hexDcaData} hexTokenPnl={tokenPnlData?.positions?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} hexWalletPositions={tokenPnlData?.walletPositions ?? {}} walletBalances={balances ?? {}} hexPrice={{ ...(prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39'] ?? {}), priceUsd: scenarioHexPriceUsd }} hiddenWallets={hiddenWallets} liquidHexUnits={Number(addressData?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']?.normalized ?? 0)} scenarioEnabled={scenarioEnabled}/>
 
-                {!hideHexMiners && <HexComponent hexData={hexData} visibleWallets={visibleWallets} hexPrice={prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} aliases={data?.aliases ?? {}}/>}
+                {!hideHexMiners && <HexComponent hexData={hexData} visibleWallets={visibleWallets} hexPrice={{ ...(prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39'] ?? {}), priceUsd: scenarioHexPriceUsd }} aliases={data?.aliases ?? {}} scenarioEnabled={scenarioEnabled}/>} 
             </div> : ''}
             <div>
                 <div style={{ position: 'relative', minHeight: tokenPnlData?.loading ? 76 : 28, width: '100%', marginTop: 40 }}>
                     <div style={{ position: 'absolute', left: 0, top: 0, letterSpacing: 0.5 }} >
-                        Token Watchlist • <span style={{ letterSpacing: 1 }}> $ { addCommasToNumber(parseFloat(addressBalances ?? 0 ).toFixed(2)) }</span>
+                        Token Watchlist • <span style={{ letterSpacing: 1, color: scenarioEnabled ? 'rgb(240,205,130)' : undefined }}> $ { addCommasToNumber(parseFloat(scenarioEnabled ? scenarioAddressBalances : addressBalances ?? 0).toFixed(2)) }</span>{scenarioEnabled ? <span style={{ marginLeft: 8, fontSize: 10, color: 'rgb(240,205,130)', letterSpacing: .5 }}>SCENARIO</span> : null}
                     </div>
                     <div
                         className="desktop-only mute"
@@ -743,6 +969,9 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                             priceArray={priceArray}
                             tokenPnl={tokenPnlData?.positions?.[tokenAddress?.toLowerCase()]}
                             tokenPnlLoading={tokenPnlData?.loading === true && (tokenPnlData?.activeTokens ?? []).includes(tokenAddress?.toLowerCase())}
+                            scenarioEnabled={scenarioEnabled}
+                            scenarioPriceUsd={scenarioPriceFor(tokenAddress)}
+                            scenarioAffected={scenarioEnabled && SCENARIO_CORE_TOKENS.some(({ address }) => address === tokenAddress?.toLowerCase())}
                         />
                     })}
                 </div>
@@ -750,7 +979,7 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                 <div>
                     <div style={{ position: 'relative', marginTop: 50, minHeight: 5 }}>
                         <div style={{ position: 'absolute', left: 0, top: -35, width: '100%', letterSpacing: 0.5 }}>
-                            Liquidity Pools • {farmData?.loading === true || lpData?.loading === true ? 'Loading' : <span style={{ letterSpacing: 1 }}>$ { addCommasToNumber( parseFloat(parseFloat(addressFarms ?? 0 ) + parseFloat(addressLps ?? 0)).toFixed(2) ) }</span>}
+                            Liquidity Pools • {farmData?.loading === true || lpData?.loading === true ? 'Loading' : <span style={{ letterSpacing: 1, color: scenarioEnabled ? 'rgb(240,205,130)' : undefined }}>$ { addCommasToNumber( parseFloat(scenarioEnabled ? Number(scenarioAddressFarms ?? 0) + Number(scenarioAddressLps ?? 0) : Number(addressFarms ?? 0) + Number(addressLps ?? 0)).toFixed(2) ) }</span>}{scenarioEnabled ? <span style={{ marginLeft: 8, fontSize: 10, color: 'rgb(240,205,130)', letterSpacing: .5 }}>SCENARIO</span> : null}
                             {farmData?.loading === true || lpData?.loading === true ? <div style={{ position: 'absolute', right: hasIncFarmActivity ? 50: -40, top: -5}}>
                                 <Tooltip content="Retrieving PulseX Farm Data">
                                     <LoadingWave speed={100} numDots={8}/>
@@ -767,7 +996,7 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                                         </Tooltip>
                                     )}
 
-                                    <div style={{ fontSize: 12, opacity: 0.8 }}>
+                                    <div style={{ fontSize: 12, opacity: 0.8, color: scenarioEnabled ? 'rgb(240,205,130)' : undefined }}>
                                         ~ {Number.isFinite(incPerDay)
                                             ? addCommasToNumber(incPerDay.toFixed(2))
                                             : '0.00'} INC/day
@@ -775,6 +1004,7 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                                         ($ {Number.isFinite(incUsdPerDay)
                                             ? addCommasToNumber(incUsdPerDay.toFixed(2))
                                             : '0.00'}/day)
+                                        {scenarioEnabled ? <span style={{ marginLeft: 6, fontSize: 10, letterSpacing: .5 }}>SCENARIO</span> : null}
                                     </div>
                                 </div> : ''}
                             <div/>
@@ -787,7 +1017,10 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                                 addressData: poolData.type === 'lp' ? lps?.[poolData?.lpAddress] : farm?.[poolData?.lpAddress],
                                 prices,
                                 getImage,
-                                priceArray
+                                priceArray,
+                                scenarioEnabled,
+                                scenarioPriceFor,
+                                isScenarioCoreToken
                             }
                             return poolData.type === 'lp' ? <SingleLPButton key={`dlp-${i}`} {...props}/> : <SingleFarmButton key={`dfarm-${i}`} {...props}/>
                         })}

@@ -13,8 +13,8 @@ import ImgUSDT from '../../icons/usdt.png'
 import ImgDAI from '../../icons/dai.png'
 
 const Wrapper = styled.div`
-    border: 1px solid rgb(70,70,70);
-    background: rgb(15,15,15);
+    border: 1px solid ${props => props.$scenario ? 'rgba(227, 184, 92, .80)' : 'rgb(70,70,70)'};
+    background: ${props => props.$scenario ? 'linear-gradient(to bottom, rgba(227, 184, 92, .10), rgb(15,15,15) 65%)' : 'rgb(15,15,15)'};
     padding: 25px;
     text-align: center;
     position: relative;
@@ -24,6 +24,23 @@ const Wrapper = styled.div`
         padding-top: 15px;
         font-size: 24px;
         letter-spacing: 1px !important;
+    }
+
+    .jumbo-value-row {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        white-space: nowrap;
+    }
+
+    .jumbo-currency {
+        font-family: 'Oswald', sans-serif;
+        font-size: 62px;
+        line-height: 1.08;
+        font-weight: 600;
+        color: rgb(235,235,235);
+        flex: 0 0 auto;
     }
 
     .jumbo-price {
@@ -47,14 +64,9 @@ const Wrapper = styled.div`
             color: white;
         }
     }
-    @keyframes digitReelUp {
+    @keyframes digitReel {
         from { transform: translateY(0); }
-        to { transform: translateY(calc(-100% + 1em)); }
-    }
-
-    @keyframes digitReelDown {
-        from { transform: translateY(calc(-100% + 1em)); }
-        to { transform: translateY(0); }
+        to { transform: translateY(calc(-1em * var(--digit-steps))); }
     }
     `
 
@@ -89,9 +101,12 @@ const RollingBalance = ({ value }) => {
         return path
     }
 
-    const maxLength = Math.max(previousValue.length, currentValue.length)
-    const oldText = previousValue.padStart(maxLength, ' ')
-    const newText = currentValue.padStart(maxLength, ' ')
+    // Render only the width of the current value. Previously we padded both
+    // values to the longer string, which could leave invisible leading spaces
+    // between the $ sign and the number until the next price update.
+    const maxLength = currentValue.length
+    const oldText = previousValue.padStart(maxLength, ' ').slice(-maxLength)
+    const newText = currentValue
 
     return (
         <span style={{
@@ -127,7 +142,7 @@ const RollingBalance = ({ value }) => {
                 }
 
                 const path = getDigitPath(oldChar, char)
-                const goingUp = Number(char) > Number(oldChar)
+                const steps = Math.max(0, path.length - 1)
 
                 return (
                     <span key={`${rollingKey}-${index}`} style={baseStyle}>
@@ -137,7 +152,8 @@ const RollingBalance = ({ value }) => {
                                 left: 0,
                                 top: 0,
                                 width: '100%',
-                                animation: `digitReel${goingUp ? 'Up' : 'Down'} 850ms cubic-bezier(0.22, 1, 0.36, 1) forwards`
+                                '--digit-steps': steps,
+                                animation: `digitReel 850ms cubic-bezier(0.22, 1, 0.36, 1) forwards`
                             }}
                         >
                             {path.map((digit, i) => (
@@ -163,7 +179,7 @@ const RollingBalance = ({ value }) => {
 }
 
 export default memo(PriceJumbo)
-function PriceJumbo ({ balance = 0, wallets = {}, loading = false, isFiltered = false, loadingStatuses = {}, bestStable = null }) {
+function PriceJumbo ({ balance = 0, liveBalance = 0, scenarioEnabled = false, wallets = {}, loading = false, isFiltered = false, loadingStatuses = {}, bestStable = null }) {
     const [ walletModal, setWalletModal ] = useAtom(walletsModalAtom)
     
     const balancesLoading = loading
@@ -182,7 +198,7 @@ function PriceJumbo ({ balance = 0, wallets = {}, loading = false, isFiltered = 
 
     const bestStableImage = !bestStable?.symbol ? undefined : bestStable?.symbol === 'USDC' ? ImgUSDC : bestStable?.symbol === 'USDT' ? ImgUSDT : bestStable?.symbol === 'DAI' ? ImgDAI : null
 
-    if (noAddresses) return <Wrapper>
+    if (noAddresses) return <Wrapper $scenario={false}>
         <div className="jumbo-header">
             <div style={{ fontSize: 12, fontFamily: 'sans-serif', color: 'rgb(120,120,120)', position: 'absolute', top: 10, right: 15 }}>
                 <Tooltip content={<div style={{ textAlign: 'center' }}>
@@ -202,7 +218,7 @@ function PriceJumbo ({ balance = 0, wallets = {}, loading = false, isFiltered = 
         </div>
     </Wrapper>
 
-    return <Wrapper>
+    return <Wrapper $scenario={scenarioEnabled}>
         <div style={{ fontSize: 12, fontFamily: 'sans-serif', color: 'rgb(120,120,120)', position: 'absolute', top: 10, right: 15 }}>
             <Tooltip content={<div style={{ textAlign: 'center' }}>
                 All prices and percentages are approximations<br/>based off the value of {bestStable?.name ?? 'DAI'} from Ethereum</div>
@@ -214,14 +230,15 @@ function PriceJumbo ({ balance = 0, wallets = {}, loading = false, isFiltered = 
         </div>
         
         <div className="jumbo-header">
-            {isFiltered ? 'Filtered Addresses' : 'All Addresses'}
+            {scenarioEnabled ? 'Scenario Portfolio' : (isFiltered ? 'Filtered Addresses' : 'All Addresses')}
+            {scenarioEnabled ? <span style={{ marginLeft: 9, padding: '2px 6px', border: '1px solid rgba(227,184,92,.65)', borderRadius: 3, fontFamily: 'sans-serif', fontSize: 9, color: 'rgb(240,205,130)', verticalAlign: 'middle' }}>SCENARIO</span> : null}
         </div>
-        <div>
-            <span>
-                $ 
+        <div className="jumbo-value-row">
+            <span className="jumbo-currency" style={scenarioEnabled ? { color: 'rgb(240,205,130)' } : undefined}>
+                $
             </span>
-            <span className="jumbo-price">
-                <RollingBalance value={balance} /><br/>
+            <span className="jumbo-price" style={scenarioEnabled ? { color: 'rgb(240,205,130)' } : undefined}>
+                <RollingBalance value={balance} />
             </span>
         </div>
         {balancesLoading ? <div className="jumbo-loader">

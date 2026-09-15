@@ -30,7 +30,7 @@ const FarmListItemWrapper = styled.div`
 `
 
 export default memo(SingleFarmButton)
-function SingleFarmButton ({ poolData, addressData, prices, getImage, priceArray }) {
+function SingleFarmButton ({ poolData, addressData, prices, getImage, priceArray, scenarioEnabled = false, scenarioPriceFor = null, isScenarioCoreToken = null }) {
     const [ liquidityPoolModal, setLiquidityPoolModal ] = useAtom(liquidityPoolModalAtom)
 
     const isToken0Wpls = poolData?.token0?.toLowerCase() == '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
@@ -43,8 +43,30 @@ function SingleFarmButton ({ poolData, addressData, prices, getImage, priceArray
     const token0display = priceInfo0?.symbol ?? shortenString(poolData?.token0 ?? '').toLowerCase()
     const token1display = priceInfo1?.symbol ?? shortenString(poolData?.token1 ?? '').toLowerCase()
 
-    const totalUsd = Number(addressData?.token0?.usd ?? 0) + Number(addressData?.token1?.usd ?? 0) + Number(addressData?.rewards?.usd ?? 0)
+    const token0Address = String(poolData?.token0 ?? addressData?.token0Address ?? '').toLowerCase()
+    const token1Address = String(poolData?.token1 ?? addressData?.token1Address ?? '').toLowerCase()
+    const incAddress = '0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d'
+
+    const scenarioLegUsd = (leg, address) => {
+        const liveUsd = Number(leg?.usd ?? 0)
+        if (!scenarioEnabled || !isScenarioCoreToken?.(address)) return liveUsd
+        const units = Number(leg?.normalized ?? 0)
+        const price = Number(scenarioPriceFor?.(address))
+        return Number.isFinite(units) && Number.isFinite(price) ? units * price : liveUsd
+    }
+
+    const token0Usd = scenarioLegUsd(addressData?.token0, token0Address)
+    const token1Usd = scenarioLegUsd(addressData?.token1, token1Address)
     const inc = parseFloat(addressData?.rewards?.normalized ?? '0')
+    const rewardsUsd = scenarioEnabled && Number.isFinite(Number(scenarioPriceFor?.(incAddress)))
+        ? inc * Number(scenarioPriceFor(incAddress))
+        : Number(addressData?.rewards?.usd ?? 0)
+    const totalUsd = token0Usd + token1Usd + rewardsUsd
+    const scenarioAffected = scenarioEnabled && totalUsd > 0 && (
+        isScenarioCoreToken?.(token0Address) ||
+        isScenarioCoreToken?.(token1Address) ||
+        inc > 0
+    )
     const displayInc = inc === 0 ? '-' 
         : inc < 100_000 ? addCommasToNumber(inc.toFixed(2))
         : fUnit( parseFloat(addressData?.rewards?.normalized ?? '0'), 2 )
@@ -55,7 +77,8 @@ function SingleFarmButton ({ poolData, addressData, prices, getImage, priceArray
                 marginTop: 5,
                 padding: '15px 25px',
                 position: 'relative',
-                background: background
+                background: scenarioAffected ? 'linear-gradient(to bottom, rgba(227, 184, 92, 0.12), rgba(227, 184, 92, 0.035))' : background,
+                border: scenarioAffected ? '1px solid rgba(227, 184, 92, .65)' : undefined
             }}
             onClick={() => {
                 setLiquidityPoolModal({
@@ -95,7 +118,7 @@ function SingleFarmButton ({ poolData, addressData, prices, getImage, priceArray
                                     : 'Unknown'}
                             </div>
                             <div className="desktop-only">
-                                {priceInfo0 ? '$ ' + fUnit(parseFloat(addressData?.token0?.usd ?? '0'), 2)
+                                {priceInfo0 ? '$ ' + fUnit(parseFloat(token0Usd ?? '0'), 2)
                                     : 'Click to Update'}
                             </div>
                             <div>{token1display}</div>
@@ -104,7 +127,7 @@ function SingleFarmButton ({ poolData, addressData, prices, getImage, priceArray
                                     : 'Unknown'}
                             </div>
                             <div className="desktop-only">
-                                {priceInfo1 ? '$ ' + fUnit(parseFloat(addressData?.token1?.usd ?? '0'), 2)
+                                {priceInfo1 ? '$ ' + fUnit(parseFloat(token1Usd ?? '0'), 2)
                                     : 'Click to Update'}
                             </div>
                         </div>
@@ -138,7 +161,7 @@ function SingleFarmButton ({ poolData, addressData, prices, getImage, priceArray
                         }}
                         className="mute"
                     >
-                        $ {addCommasToNumber( parseFloat(addressData?.rewards?.usd ?? '0').toFixed(2))}<br/>
+                        $ {addCommasToNumber( parseFloat(rewardsUsd ?? '0').toFixed(2))}{scenarioAffected ? <span style={{ marginLeft: 6, color: 'rgb(240,205,130)', fontSize: 10 }}>SCENARIO</span> : null}<br/>
                         INC: {displayInc}
                     </div>
                 </div>

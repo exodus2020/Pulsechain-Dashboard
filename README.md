@@ -63,6 +63,66 @@ Track multiple wallets simultaneously with individual holdings, stakes, farms, l
 </tr>
 </table>
 
+## 🚀 v2.4.0 — Scenario Mode & Saved Price Presets
+
+Version 2.4.0 introduces **Scenario Mode**, a forward-looking portfolio simulator for exploring hypothetical PulseChain token prices without changing wallet balances, token quantities, or protocol reward rates.
+
+### 🔮 Scenario Mode
+- Added a dedicated Scenario Mode for modeling hypothetical portfolio values.
+- Set individual target prices for **PLS, PLSX, HEX, INC, and PRVX**.
+- Added quick **2x, 5x, 10x, 25x, and 100x** multiplier presets based on current live core-token prices.
+- Added a Global multiplier field for custom portfolio-wide price scenarios.
+- Scenario values propagate through portfolio totals, Token Watchlist values, HEX Miner analytics, liquidity positions, and farm reward USD estimates.
+- Live market prices remain visible for reference while Scenario Mode is active.
+
+### 💾 Saved Scenarios & ATH Preset
+- Added named scenario presets that can be saved, loaded, updated, and deleted.
+- Added a built-in **ATH 🔒** preset using recorded PulseChain all-time-high prices for the core tokens.
+- The ATH preset is protected from deletion so it is always available after updating or installing the dashboard.
+- ATH values remain editable while loaded, allowing them to be used as a starting point for custom scenarios.
+- Editing ATH does not overwrite the protected preset; enter a new scenario name to save the modified values as a separate preset.
+
+### ⛏️ HEX Miner Scenario Analytics
+- HEX Miner principal, mined value, and estimated P&L respond to the selected scenario HEX price.
+- Stake quantities, T-Shares, average length, and reconstructed DCA remain unchanged.
+- Scenario styling clearly distinguishes projected values from live portfolio data.
+
+### 💧 Liquidity & Farm Scenarios
+- Liquidity-pool values update using scenario token prices while underlying LP quantities remain unchanged.
+- Farm reward USD estimates respond to the scenario INC price.
+- INC/day token emission rates remain unchanged, keeping projected reward values separate from protocol reward assumptions.
+
+### 🎨 UI & Reliability
+- Added gold Scenario styling and labels throughout affected portfolio sections.
+- Scenario calculations are derived from the selected target prices rather than repeatedly multiplying previously projected values.
+- Switching between multipliers, saved scenarios, custom values, and Reset now returns consistent portfolio totals.
+- Reset restores current live core-token prices.
+
+### 📸 Scenario Mode
+
+<table>
+<tr>
+<td align="center"><strong>Scenario Portfolio Overview</strong></td>
+<td align="center"><strong>Custom Scenarios & ATH Preset</strong></td>
+</tr>
+<tr>
+<td align="center"><img src="public/Screenshots/2.4.0/Scenario%20Mode%20Overview.png" width="500" alt="PulseChain Dashboard Scenario Mode Overview"></td>
+<td align="center"><img src="public/Screenshots/2.4.0/Custom%20Scenarios.png" width="500" alt="PulseChain Dashboard Custom Scenarios and ATH Preset"></td>
+</tr>
+<tr>
+<td align="center">Model hypothetical token prices and see the projected portfolio, HEX Miner, and token values update together.</td>
+<td align="center">Load the protected ATH preset, edit its prices, or save completely custom target-price scenarios.</td>
+</tr>
+</table>
+
+<p align="center">
+<strong>Scenario Liquidity & Farm Rewards</strong><br><br>
+<img src="public/Screenshots/2.4.0/Scenario%20Farm%20Rewards.png" width="750" alt="PulseChain Dashboard Scenario Liquidity Pools and Farm Rewards"><br>
+Project liquidity values and farm reward USD estimates while keeping protocol token reward rates unchanged.
+</p>
+
+---
+
 ## v2.3.0 — Portfolio P&L & Cost Basis
 
 Version 2.3.0 introduces historical cost-basis tracking and portfolio profit/loss calculations to the PulseChain Dashboard.
@@ -151,146 +211,6 @@ This patch improves startup reliability and fixes INC/day farm reward estimates.
 
 ---
 
-## 🚀 v2.2.0 — Lifetime HEX DCA & Multi-Chain Purchase Tracking
-
-This release introduces one of the biggest upgrades to PulseChain Dashboard yet: **lifetime HEX dollar-cost averaging (DCA)** with historical purchase reconstruction across both Ethereum and PulseChain.
-
-### ✨ New Features
-
-- 📈 Lifetime HEX Dollar-Cost Average (DCA) tracking
-- ⛓️ Automatic reconstruction of lifetime HEX purchases across Ethereum and PulseChain
-- 💰 Historical pricing using archived market data with automatic fallbacks
-- 🧮 Weighted lifetime average entry price calculation
-- 🌐 Combined multi-chain purchase history
-- 📊 Network-by-network purchase breakdown
-- 👛 Wallet-by-wallet DCA breakdown
-- 📉 Current profit/loss and return percentage based on your average entry
-
-### ⚡ Performance
-
-- Persistent caching of transaction history for dramatically faster reloads
-- Cached historical pricing to reduce API requests
-- Live progress updates while scanning wallet history
-- Improved reliability when processing large transaction histories
-
-### 🎨 UI / UX
-
-- Added **DCA Price** card to the HEX Miners dashboard
-- Detailed hover tooltip showing:
-  - Average Entry
-  - Current Price
-  - Current Value
-  - Total Spent
-  - Total HEX Purchased
-  - Network Breakdown
-  - Wallet Breakdown
-- Improved tooltip positioning for large data sets
-
-### 🛠 Under the Hood
-
-- Added Ethereum pre-PulseChain transaction scanning
-- Added dual-chain transaction scanning across Ethereum and PulseChain
-- Improved transaction parsing for routed swaps and multicall transactions
-- Added historical price lookup fallbacks for improved pricing accuracy
-- Improved error handling and recovery when historical pricing is unavailable
-- Reduced unnecessary blockchain requests through smarter caching
-
----
-
-## 🚀 v2.1.3 — Price Accuracy & Metrics Sync
-
-This update focuses on improving price accuracy, percent tracking, and overall calculation reliability.
-
-### 🔧 Improvements
-- Synced % change calculations with **PulseCoinList** for consistent market data
-- Improved reliability of **1H / 6H / 24H / 7D / 30D** calculations across all tokens
-- Better handling of USD vs WPLS conversions using stable pair logic
-- Enhanced fallback logic for missing or inconsistent historical data
-
-### 📊 Accuracy Fixes
-- Fixed issue where % changes were stuck at **0.0%**
-- Fixed incorrect **24H calculations** drifting from real market values
-- Fixed mismatch between dashboard values and external data sources
-- Improved handling of candle-based vs API-based price anchoring
-
-### 🧠 Under the Hood
-- Integrated PulseCoinList metrics as a **reliable override layer**
-- Added caching for last known good % values to prevent flickering/resetting
-- Improved denominator stability to prevent calculation collapse
-- Cleaned up debug logging and reduced console noise
-
----
-
-## 🚀 v2.1.2 — UX & Watchlist Upgrade
-
-This release improves token management, hidden-token recovery, and bulk watchlist workflows.
-
-### ✨ New Features
-- Added **Add All Results** button for fast bulk token imports
-- Hidden tokens now reappear during **Scan** so they can be restored
-- Added seamless restore flow for previously hidden default tokens
-
-### 🎨 UI/UX
-- Default tokens can now be hidden instead of silently failing to remove
-- Improved Token Watchlist layout with balanced action buttons
-- Hidden tokens are clearly labeled in scan results
-- Cleaner token management workflow
-
-### 🐛 Fixes
-- Fixed issue where default tokens from Ethereum could not be removed
-- Fixed hidden-token recovery and re-add behavior
-- Improved watchlist consistency when adding multiple scan results
-
----
-
-## 🚀 v2.1.1 — Performance & Accuracy Patch
-
-This patch focuses on improving performance, fixing calculation edge cases, and polishing the overall user experience.
-
-### 🔧 Improvements
-- Added smart candle caching for faster startup and reduced API calls
-- Wallet % change now calculated across **all tokens**, not just core assets
-- Improved reliability of price calculations using historical data
-- Automatic update check on startup (no manual interaction required)
-
-### 🎨 UI/UX
-- Added **“Support the developer”** section with copy-to-clipboard
-- Improved loading indicator positioning and alignment
-- Fixed sidebar layout issues and spacing inconsistencies
-- Better visual feedback for update status (“Up To Date” / “Update Available”)
-
-### 🐛 Fixes
-- Fixed PRVX % showing incorrect values (including -100% bug)
-- Fixed WPLS % inconsistencies and delayed calculations
-- Fixed chart-related crashes when loading certain tokens
-- Resolved multiple console errors and edge case failures
-
----
-
-## 🚀 v2.1.0 — Stability & Charting Update
-
-This release focuses on improving reliability, performance, and overall user experience.
-
-### 🔧 Improvements
-- Fixed incorrect % changes (1H, 6H, 24H, 7D, 30D)
-- Standardized chart logic using hourly candle data
-- Improved chart loading behavior for non-core tokens
-- Added fallback handling for tokens missing price data
-- Fixed duplicate tokens appearing in wallet scans
-- Allow removal of tokens even if they fail to load
-- Improved token image loading with better fallback logic
-
-### 🎨 UI/UX
-- Improved spacing and layout consistency
-- Fixed token row alignment issues
-- Version display now reflects actual app version dynamically
-
-### 🛠️ Under the Hood
-- Reduced reliance on unreliable external price sources
-- Improved caching behavior for chart data
-- Stabilized modal + chart rendering
-
----
 
 ## 📦 Download
 
@@ -325,6 +245,8 @@ All data is stored locally and encrypted for maximum privacy.
 ## ✨ Features
 
 * 📊 Track PulseChain token balances and portfolio value
+* 🔮 Scenario Mode for hypothetical token prices and projected portfolio values
+* 💾 Save custom price scenarios and load the protected built-in ATH preset
 * 💰 Estimated token Profit & Loss (P&L) with historical cost-basis reconstruction
 * 📈 Amount-weighted average entry prices across multiple wallets
 * 👛 Track and combine multiple wallets with independent cost-basis accounting

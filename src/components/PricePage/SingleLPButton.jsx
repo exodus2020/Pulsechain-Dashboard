@@ -27,7 +27,7 @@ const FarmListItemWrapper = styled.div`
 `
 
 export default memo(SingleLPButton)
-function SingleLPButton ({ poolData, addressData, prices, getImage, priceArray }) {
+function SingleLPButton ({ poolData, addressData, prices, getImage, priceArray, scenarioEnabled = false, scenarioPriceFor = null, isScenarioCoreToken = null }) {
     const [ liquidityPoolModal, setLiquidityPoolModal ] = useAtom(liquidityPoolModalAtom)
 
     const isToken0Wpls = poolData?.token0Address?.toLowerCase() == '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
@@ -40,7 +40,19 @@ function SingleLPButton ({ poolData, addressData, prices, getImage, priceArray }
     const token0display = priceInfo0?.symbol ?? shortenString(poolData?.token0Address ?? '').toLowerCase()
     const token1display = priceInfo1?.symbol ?? shortenString(poolData?.token1Address ?? '').toLowerCase()
 
-    const totalUsd = Number(addressData?.token0?.usd ?? 0) + Number(addressData?.token1?.usd ?? 0) + Number(addressData?.rewards?.usd ?? 0)
+    const token0Address = String(poolData?.token0Address ?? addressData?.token0Address ?? '').toLowerCase()
+    const token1Address = String(poolData?.token1Address ?? addressData?.token1Address ?? '').toLowerCase()
+    const scenarioLegUsd = (leg, address) => {
+        const liveUsd = Number(leg?.usd ?? 0)
+        if (!scenarioEnabled || !isScenarioCoreToken?.(address)) return liveUsd
+        const units = Number(leg?.normalized ?? 0)
+        const price = Number(scenarioPriceFor?.(address))
+        return Number.isFinite(units) && Number.isFinite(price) ? units * price : liveUsd
+    }
+    const token0Usd = scenarioLegUsd(addressData?.token0, token0Address)
+    const token1Usd = scenarioLegUsd(addressData?.token1, token1Address)
+    const totalUsd = token0Usd + token1Usd
+    const scenarioAffected = scenarioEnabled && totalUsd > 0 && (isScenarioCoreToken?.(token0Address) || isScenarioCoreToken?.(token1Address))
 
     const alert = !priceInfo1 || !priceInfo0
 
@@ -50,7 +62,8 @@ function SingleLPButton ({ poolData, addressData, prices, getImage, priceArray }
                 marginTop: 5,
                 padding: '15px 25px',
                 position: 'relative',
-                background: background
+                background: scenarioAffected ? 'linear-gradient(to bottom, rgba(227, 184, 92, 0.12), rgba(227, 184, 92, 0.035))' : background,
+                border: scenarioAffected ? '1px solid rgba(227, 184, 92, .65)' : undefined
             } : {
                 marginTop: 5,
                 padding: '15px 25px',
@@ -101,7 +114,7 @@ function SingleLPButton ({ poolData, addressData, prices, getImage, priceArray }
                                     : 'Unknown'}
                             </div>
                             <div className="desktop-only">
-                                {priceInfo0 ? '$ ' + fUnit(parseFloat(addressData?.token0?.usd ?? '0'), 2)
+                                {priceInfo0 ? '$ ' + fUnit(parseFloat(token0Usd ?? '0'), 2)
                                     : 'Click to Update'}
                             </div>
                             <Tooltip content={token1display}>
@@ -115,7 +128,7 @@ function SingleLPButton ({ poolData, addressData, prices, getImage, priceArray }
                                     : 'Unknown'}
                             </div>
                             <div className="desktop-only">
-                                {priceInfo1 ? '$ ' + fUnit(parseFloat(addressData?.token1?.usd ?? '0'), 2)
+                                {priceInfo1 ? '$ ' + fUnit(parseFloat(token1Usd ?? '0'), 2)
                                     : 'Click to Update'}
                             </div>
                         </div>

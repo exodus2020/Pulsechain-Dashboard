@@ -166,7 +166,8 @@ function HexComponent ({
     visibleWallets,
     hexPrice,
     setHide,
-    aliases = {}
+    aliases = {},
+    scenarioEnabled = false
     // historyData, priceData, getImage
 }) {
     const hexUsd = hexPrice?.priceUsd

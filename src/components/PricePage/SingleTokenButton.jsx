@@ -14,7 +14,7 @@ const HEX_ADDRESS = '0x2b591e99afe9f32eaa6214f7b7629768c40eeb39'
 const background = 'linear-gradient(to bottom, rgba(50, 50, 50, 0.3), rgba(50, 50, 50, 0.1))'
 
 export default memo(SingleTokenButton)
-function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, watchlistData, tokenPnl, tokenPnlLoading = false, token = undefined, tokenAddress = undefined }) {
+function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, watchlistData, tokenPnl, tokenPnlLoading = false, token = undefined, tokenAddress = undefined, scenarioEnabled = false, scenarioPriceUsd = null, scenarioAffected = false }) {
     const [ singleTokenModal, setSingleTokenModal ] = useAtom(tokenModalAtom)
     const tokenAddresses = token ? [token] :priceArray.filter(f => prices[f]?.pairId === pairId);
     const context = useAppContext()
@@ -81,11 +81,18 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
     const image = getImage(tokenAddress?.toLowerCase());
     const priceInfo = prices?.[tokenAddress];
     const isLoading = !priceInfo
-    const balanceUsdRaw = parseFloat(balances?.[tokenAddress.toLowerCase()]?.usd ?? 0)
-    const balanceUsd = addCommasToNumber( balanceUsdRaw.toFixed(2) )
+    const liveBalanceUsdRaw = parseFloat(balances?.[tokenAddress.toLowerCase()]?.usd ?? 0)
     const balanceTokensRaw = parseFloat( balances?.[tokenAddress.toLowerCase()]?.normalized ?? 0 )
     const balanceTokens = balanceTokensRaw.toFixed(2)
-    const displayPriceUsd = formatNumber(priceInfo?.priceUsd ?? 0, true, true)
+    const livePriceUsd = Number(priceInfo?.priceUsd ?? 0)
+    const effectivePriceUsd = scenarioAffected && Number.isFinite(Number(scenarioPriceUsd))
+        ? Number(scenarioPriceUsd)
+        : livePriceUsd
+    const balanceUsdRaw = scenarioAffected
+        ? balanceTokensRaw * effectivePriceUsd
+        : liveBalanceUsdRaw
+    const balanceUsd = addCommasToNumber( balanceUsdRaw.toFixed(2) )
+    const displayPriceUsd = formatNumber(effectivePriceUsd, true, true)
 
     const averageEntry = Number(tokenPnl?.averageEntry)
     const reconstructedUnits = Number(tokenPnl?.units ?? 0)
@@ -215,8 +222,11 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
             Cost Basis<br/>
             $ {addCommasToNumber(Number(pnlCostBasis ?? 0).toFixed(2))}
             <br/><br/>
-            Current Value<br/>
+            {scenarioAffected ? 'Scenario Value' : 'Current Value'}<br/>
             $ {addCommasToNumber(balanceUsdRaw.toFixed(2))}
+            {scenarioAffected ? <>
+                <br/><span style={{ color: 'rgb(240,205,130)', fontSize: 11 }}>at ${formatNumber(effectivePriceUsd, true, true)}</span>
+            </> : null}
             <br/><br/>
             <span className="mute">
                 {isPrvxMaxMultiplierEstimate
@@ -271,7 +281,10 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
                     marginTop: 5,
                     padding: '15px 25px',
                     position: 'relative',
-                    background: background
+                    background: scenarioAffected
+                        ? 'linear-gradient(to bottom, rgba(227, 184, 92, 0.12), rgba(227, 184, 92, 0.035))'
+                        : background,
+                    border: scenarioAffected ? '1px solid rgba(227, 184, 92, .65)' : undefined
                 }}
                 onClick={() => {
                     setSingleTokenModal(priceInfo);
@@ -298,6 +311,7 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
                             <span style={{ letterSpacing: 1 }}>
                                 {displayPriceUsd || '-'}
                             </span>
+                            {scenarioAffected ? <span style={{ marginLeft: 7, color: 'rgb(240,205,130)', fontSize: 10, letterSpacing: .5 }}>SCENARIO</span> : null}
                         </div>
                     </div>
                     <div
@@ -310,13 +324,18 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
                     >
                         <div
                             style={{
-                                fontSize: 18,
+                                fontSize: (scenarioAffected ? balanceUsd : String(priceInfo.otherValue || balanceUsd)).length > 12 ? 16 : 18,
                                 letterSpacing: 1,
+                                display: 'flex',
+                                justifyContent: 'flex-end',
+                                alignItems: 'baseline',
+                                gap: 4,
+                                whiteSpace: 'nowrap'
                             }}
                         >
-                            <span style={{ color: 'rgb(200,200,200)' }}>$</span>{' '}
-                            <span style={{ fontFamily: "'Oswald', sans-serif"}} className="price-balance">
-                                {priceInfo.otherValue || balanceUsd}
+                            <span style={{ color: 'rgb(200,200,200)', flex: '0 0 auto' }}>$</span>
+                            <span style={{ fontFamily: "'Oswald', sans-serif", flex: '0 0 auto' }} className="price-balance">
+                                {scenarioAffected ? balanceUsd : (priceInfo.otherValue || balanceUsd)}
                             </span>
                         </div>
                         <div
@@ -366,10 +385,20 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
                                 <>
                                     <div
                                         style={{
-                                            fontSize: 17,
-                                            letterSpacing: 0.5,
+                                            fontSize: (() => {
+                                                const len = String(formatPnlUsd(pnlUsd) ?? '').length
+                                                if (len >= 18) return 11
+                                                if (len >= 16) return 12
+                                                if (len >= 14) return 13
+                                                if (len >= 12) return 15
+                                                return 17
+                                            })(),
+                                            letterSpacing: 0.25,
                                             color: pnlColor,
-                                            whiteSpace: 'nowrap'
+                                            whiteSpace: 'nowrap',
+                                            width: '100%',
+                                            overflow: 'hidden',
+                                            textOverflow: 'clip'
                                         }}
                                     >
                                         {formatPnlUsd(pnlUsd)}
