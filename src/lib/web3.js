@@ -86,15 +86,43 @@ const waitForExplorerRetry = milliseconds => {
 }
 
 
+// Serialize Ethereum Blockscout requests. DCA and Token P&L can otherwise hit
+// the same public explorer at once and trigger 429s. Keep this gate local to
+// Ethereum so PulseChain discovery remains fast.
+let ethereumExplorerNextRequestAt = 0
+const waitForEthereumExplorerSlot = async (endpoint, minimumSpacingMs = 1800) => {
+    if (!String(endpoint).includes("eth.blockscout.com")) return
+
+    // V151: reserve the slot BEFORE waiting. Previously concurrent callers all
+    // observed the same next-request timestamp, slept together, then woke up
+    // together and hit Blockscout as a burst. That thundering-herd pattern was
+    // the main reason a nominal 6.5s throttle still produced repeated 429s.
+    // JavaScript executes this reservation synchronously, so every caller gets
+    // its own distinct slot without forcing a huge blanket delay.
+    // V154: callers already choose the spacing appropriate to their pipeline.
+    // The old hard 1200ms floor silently turned HEX DCA's intentional 550ms
+    // candidate-detail lane back into >=1.2s/request, making Ethereum verification
+    // much slower than PulseChain. Keep the shared slot reservation (no bursts),
+    // but honor the caller's controlled spacing down to 500ms.
+    const spacingMs = Math.max(500, Number(minimumSpacingMs) || 1800)
+    const now = Date.now()
+    const reservedAt = Math.max(now, ethereumExplorerNextRequestAt)
+    ethereumExplorerNextRequestAt = reservedAt + spacingMs
+    const waitMs = Math.max(0, reservedAt - now)
+    if (waitMs > 0) await waitForExplorerRetry(waitMs)
+}
+
 const fetchExplorerPageWithRetry = async (
     endpoint,
     params = {},
-    attempts = 4
+    attempts = 4,
+    minimumSpacingMs = 1800
 ) => {
     let lastError
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
         try {
+            await waitForEthereumExplorerSlot(endpoint, minimumSpacingMs)
             const response = await axios.get(endpoint, {
                 params,
                 timeout: 30000
@@ -103,18 +131,25 @@ const fetchExplorerPageWithRetry = async (
             return response?.data ?? {}
         } catch (error) {
             lastError = error
+            const status = error?.response?.status ?? "network error"
 
-            const status =
-                error?.response?.status ?? "network error"
-
-            console.warn(
-                `Explorer request failed on attempt ${attempt}/${attempts}:`,
-                status,
-                endpoint
-            )
+            // Intermediate explorer failures are expected on public endpoints.
+            // Retry/backoff below; callers surface a final failure if all attempts fail.
 
             if (attempt < attempts) {
-                await waitForExplorerRetry(attempt * 1000)
+                const retryAfter = Number(error?.response?.headers?.["retry-after"] ?? 0)
+                const retryMs = status === 429
+                    ? Math.max(15000, retryAfter * 1000, attempt * 10000)
+                    : status === 503
+                        ? Math.max(8000, attempt * 5000)
+                        : attempt * 1500
+                if (String(endpoint).includes("eth.blockscout.com")) {
+                    ethereumExplorerNextRequestAt = Math.max(
+                        ethereumExplorerNextRequestAt,
+                        Date.now() + retryMs
+                    )
+                }
+                await waitForExplorerRetry(retryMs)
             }
         }
     }
@@ -142,7 +177,9 @@ export const fetchCompleteAddressTransactions = async (
         onProgress = null,
         onPage = null,
         startBlock = 0,
-        endBlock = 99999999
+        endBlock = 99999999,
+        tokenAddress = null,
+        minimumSpacingMs = 1800
     } = options
 
     if (!address) {
@@ -315,7 +352,9 @@ export const fetchCompleteAddressTokenTransfers = async (
         onProgress = null,
         onPage = null,
         startBlock = 0,
-        endBlock = 99999999
+        endBlock = 99999999,
+        tokenAddress = null,
+        minimumSpacingMs = 1800
     } = options
 
     if (!address) return []
@@ -350,9 +389,11 @@ export const fetchCompleteAddressTokenTransfers = async (
                 page,
                 offset: pageSize,
                 startblock: Math.max(0, Number(startBlock) || 0),
-                endblock: Math.max(0, Number(endBlock) || 99999999)
+                endblock: Math.max(0, Number(endBlock) || 99999999),
+                ...(tokenAddress ? { contractaddress: String(tokenAddress).toLowerCase().trim() } : {})
             },
-            retryAttempts
+            retryAttempts,
+            minimumSpacingMs
         )
 
         const rawItems = Array.isArray(pageData?.result) ? pageData.result : []
@@ -442,6 +483,102 @@ export const fetchCompleteAddressTokenTransfers = async (
     }
 
     return transfers
+}
+
+
+
+/**
+ * DCA-specific discovery: fetch only incoming transfers of one token.
+ * This keeps Ethereum DCA discovery tiny (HEX receipts only) instead of
+ * walking every transaction the wallet has ever made.
+ */
+export const fetchIncomingTokenTransferTransactions = async (
+    address,
+    tokenAddress,
+    network = "ethereum",
+    settings = defaultSettings,
+    options = {}
+) => {
+    const { maxPages = 100, delayBetweenPages = 350, retryAttempts = 6, onProgress = null } = options
+    const wallet = String(address ?? "").toLowerCase().trim()
+    const token = String(tokenAddress ?? "").toLowerCase().trim()
+    if (!isValidWalletAddress(wallet) || !isValidWalletAddress(token)) return []
+
+    const configured = settings?.scan?.[network]
+    const legacyBase = Array.isArray(configured) ? configured[0] : configured
+    if (!legacyBase) throw new Error(`No explorer API is configured for network: ${network}`)
+    const origin = legacyBase.replace(/\/api\/?$/i, "")
+    const endpoint = `${origin}/api/v2/addresses/${wallet}/token-transfers`
+
+    const rows = []
+    let scannedTransfers = 0
+    const seenHashes = new Set()
+    const seenCursors = new Set()
+    let cursor = null
+    let page = 0
+
+    do {
+        if (page >= maxPages) throw new Error(`Incoming token-transfer history exceeded ${maxPages} pages for ${wallet}`)
+        // v106: use token-filtered discovery on BOTH chains. v105 proved Ethereum
+        // discovery itself works (hundreds of incoming ERC-20 hashes were found);
+        // the failure is in transaction-detail/receipt decoding. Keep discovery
+        // focused on HEX so the detail pass only inspects relevant hashes.
+        const query = { type: "ERC-20", filter: "to", token, ...(cursor ?? {}) }
+        const data = await fetchExplorerPageWithRetry(endpoint, query, retryAttempts)
+        const items = Array.isArray(data?.items) ? data.items : []
+        scannedTransfers += items.length
+        for (const item of items) {
+            const hash = String(item?.transaction_hash ?? item?.transaction?.hash ?? "").toLowerCase()
+            const to = String(item?.to?.hash ?? item?.to ?? "").toLowerCase()
+            // v103: Blockscout has used several token-address shapes across API
+            // revisions. Do not silently discard a valid HEX receipt just because
+            // the address moved to a different field.
+            const itemToken = String(
+                item?.token?.address_hash ??
+                item?.token?.address ??
+                item?.token?.contract_address_hash ??
+                item?.token?.contract_address ??
+                item?.token_address_hash ??
+                item?.token_address ??
+                item?.address_hash ??
+                ""
+            ).toLowerCase()
+            // v104 diagnostic/correctness change: do NOT require Blockscout's token
+            // metadata to identify HEX at discovery time.  The API has changed its
+            // token object shape before, and a bad/missing token address was enough
+            // to turn a real HEX purchase into zero candidates.  Every incoming
+            // ERC-20 transaction hash is cheap to preserve here; the existing receipt
+            // decoder remains the authority that decides whether the transaction
+            // actually contains incoming HEX and qualifies as a purchase.
+            if (!hash || to !== wallet || seenHashes.has(hash)) continue
+            // v106: strict HEX filtering on both networks.
+            if (itemToken !== token) continue
+            seenHashes.add(hash)
+            rows.push({
+                hash,
+                block: Number(item?.block_number ?? item?.block ?? 0),
+                method: String(item?.method ?? ""),
+                timestamp: item?.timestamp ?? null,
+                value: "0",
+                originating_address: wallet,
+                dca_discovery_source: itemToken === token
+                    ? "incoming-hex-transfer"
+                    : "incoming-erc20-transfer",
+                discovered_token_address: itemToken || null
+            })
+        }
+        page += 1
+        if (typeof onProgress === "function") onProgress({ address: wallet, page, collected: rows.length, scanned: scannedTransfers, network })
+        cursor = data?.next_page_params ?? null
+        if (cursor) {
+            const key = JSON.stringify(cursor)
+            if (seenCursors.has(key)) throw new Error(`Explorer repeated token-transfer cursor for ${wallet}`)
+            seenCursors.add(key)
+            if (delayBetweenPages > 0) await waitForExplorerRetry(delayBetweenPages)
+        }
+    } while (cursor)
+
+    return rows
 }
 
 export const batchFetchCompleteTokenTransfers = async (
@@ -557,7 +694,8 @@ export const fetchExplorerTransaction = async (
     options = {}
 ) => {
     const {
-        retryAttempts = 4
+        retryAttempts = 4,
+        minimumSpacingMs = 1800
     } = options
 
     if (!transactionHash) {
@@ -580,7 +718,8 @@ export const fetchExplorerTransaction = async (
     return fetchExplorerPageWithRetry(
         endpoint,
         {},
-        retryAttempts
+        retryAttempts,
+        minimumSpacingMs
     )
 }
 
@@ -2229,9 +2368,24 @@ export const decodeTransferLogs = async (
         settings.rpcs[network]
     )
 
-    const block = await provider.getBlock(
-        receipt.blockNumber
-    )
+    // v62: block metadata is required, but the full transaction object is not.
+    // Some public Ethereum RPCs will return the receipt/block while intermittently
+    // failing getTransaction().  Promise.all() made that optional lookup reject the
+    // entire HEX purchase candidate, which could turn a wallet with valid Ethereum
+    // purchases into DCA N/A.  Keep the proven v2.3.0 receipt path authoritative
+    // and treat native transaction value as best-effort enrichment.
+    const block = await provider.getBlock(receipt.blockNumber)
+
+    let transaction = null
+    try {
+        transaction = await provider.getTransaction(transactionHash)
+    } catch (error) {
+        console.warn("HEX DCA optional transaction lookup failed", {
+            network,
+            transactionHash,
+            message: error?.message ?? String(error)
+        })
+    }
 
     if (
         !block ||
@@ -2245,6 +2399,7 @@ export const decodeTransferLogs = async (
     return {
         transfers,
         blockNumber: Number(receipt.blockNumber),
+        transactionValue: transaction?.value?.toString?.() ?? null,
         timestamp: new Date(
             Number(block.timestamp) * 1000
         ).toISOString()

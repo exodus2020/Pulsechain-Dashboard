@@ -901,11 +901,12 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                             const key = address?.toLowerCase()
                             return prices?.[key]?.symbol ?? watchlist?.[key]?.token?.symbol ?? key?.slice(0, 8)
                         })
+                        const isTransferStage = ['transfers', 'ethereum-transfers', 'pulsechain-transfers'].includes(tokenPnlData?.progress?.stage)
                         const statusText = activeLabels.length > 0
                             ? `Calculating P&L: ${activeLabels.join(' + ')}${total > 0 ? ` • ${current}/${total} complete` : ''}`
-                            : tokenPnlData?.progress?.stage === 'transfers'
-                                ? 'Preparing wallet history for P&L…'
-                                : 'Updating cached P&L…'
+                            : isTransferStage
+                                ? `Preparing wallet history for P&L${total > 0 ? ` • ${current}/${total} complete` : ''}`
+                                : `Updating cached P&L${total > 0 ? ` • ${current}/${total} complete` : ''}`
                         return (
                             <div style={{ position: 'absolute', left: 0, top: 28, width: '100%' }}>
                                 <div style={{
@@ -922,7 +923,11 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                                     letterSpacing: 0.35
                                 }}>
                                     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{statusText}</span>
-                                    <span className="mute" style={{ whiteSpace: 'nowrap' }}>{total > 0 ? `${Math.round((current / total) * 100)}%` : 'Working…'}</span>
+                                    <span className="mute" style={{ whiteSpace: 'nowrap' }}>
+                                        {isTransferStage
+                                            ? `${total > 0 ? `${current}/${total}` : 'Working…'}`
+                                            : total > 0 ? `${current}/${total}` : 'Working…'}
+                                    </span>
                                 </div>
                                 <div style={{
                                     width: '100%',

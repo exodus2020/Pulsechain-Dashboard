@@ -19,7 +19,7 @@ const PRVX_SACRIFICE_ADDRESS = "0xafa2a89cb43619677d9c72e81f6d4c8a730a1022"
 // PRVX basis discovery does not turn into another full-wallet history scan.
 const PRVX_SACRIFICE_START_BLOCK = 23750000
 const PRVX_SACRIFICE_END_BLOCK = 24450000
-const PRVX_SACRIFICE_CACHE_VERSION = 1
+const PRVX_SACRIFICE_CACHE_VERSION = 3
 const WPLS_WRAP_CACHE_VERSION = 4
 const PLS_NATIVE_CACHE_VERSION = 1
 
@@ -313,10 +313,6 @@ const prefetchPulseXOnChainPrices = async (tokenAddress, timestamps, blockByDay,
         await Promise.all(Array.from({ length: workerCount }, () => worker()))
     }
 
-    console.info("Token P&L v21 ONCHAIN PRICE", JSON.stringify({
-        token, requested: requested.length, attempted, resolved,
-        concurrency: ONCHAIN_DAY_CONCURRENCY
-    }))
     return any
 }
 
@@ -335,7 +331,7 @@ const writePrvxSacrificeCache = (wallet, data) => {
 }
 
 const fetchPrvxNativeSacrifices = async (wallet, settings) => {
-    const configuredScan = settings?.scan?.ethereum
+    const configuredScan = settings?.scan?.mainnet
     const scanApi = Array.isArray(configuredScan) ? configuredScan[0] : configuredScan
     if (!scanApi || !window?.electron?.fetchJson) return []
     const results = []
@@ -359,7 +355,7 @@ const fetchPrvxNativeSacrifices = async (wallet, settings) => {
                 const raw = String(tx?.value ?? "0")
                 if (raw === "0") continue
                 results.push({
-                    network: "ethereum",
+                    network: "mainnet",
                     hash: String(tx?.hash ?? "").toLowerCase(),
                     blockNumber: Number(tx?.blockNumber ?? 0),
                     timestamp: Number(tx?.timeStamp ?? 0),
@@ -408,7 +404,6 @@ const fetchCompleteAddressInternalTransactions = async (wallet, settings, option
             nextPageParams = data?.next_page_params ?? null
             if (!nextPageParams || items.length === 0) break
         } catch (error) {
-            console.debug('Token P&L v40 PLS INTERNAL HISTORY FAILED', { wallet, message: error?.message })
             break
         }
     }
@@ -678,7 +673,6 @@ const getTopPool = async (tokenAddress, network = "mainnet") => {
         safeLocalStorageSet(storageKey, JSON.stringify(result))
         return result
     } catch (error) {
-        console.debug("Token P&L v15 POOL UNAVAILABLE", { network, token, status: error?.status ?? null })
         return null
     }
 }
@@ -886,7 +880,6 @@ const prefetchDefiLlamaPrices = async (tokenAddress, timestamps, network = "main
             }
         } catch (error) {
             const status = Number(error?.status ?? 0)
-            console.debug("Token P&L v15 DEFILLAMA PRICE FAILED", { network, token, coinId, status })
             if ([400, 401, 403, 404, 429].includes(status)) {
                 markProviderFailure("defillama", network, token, status)
             }
@@ -970,7 +963,6 @@ const prefetchCoinGeckoPrices = async (tokenAddress, timestamps, network = "main
             json = await fetchJsonWithRetry(url, { attempts: 2, delay: 1800, timeout: 20000 })
         } catch (error) {
             const status = Number(error?.status ?? 0)
-            console.debug("Token P&L v15 COINGECKO PRICE FAILED", { network, token, year, status })
             if ([400, 401, 403, 404, 429].includes(status)) {
                 markProviderFailure("coingecko", network, token, status)
             }
@@ -1083,9 +1075,6 @@ const prefetchHistoricalTokenPrices = async (tokenAddress, timestamps, network =
         try {
             json = await fetchJsonWithRetry(url, { attempts: 3, delay: 2000, timeout: 15000 })
         } catch (error) {
-            console.debug("Token P&L v15 BATCH PRICE FAILED", {
-                network, token, status: error?.status ?? null, requestCount
-            })
             if ([401, 403, 429].includes(Number(error?.status))) {
                 markProviderFailure("geckoterminal", network, token, error?.status)
             }
@@ -1490,11 +1479,6 @@ export default function useTokenPnl({
         )
 
         const load = async () => {
-            if (!enabled) {
-                setLoading(false)
-                return
-            }
-
             if (allWalletAddresses.length === 0 || trackedTokens.length === 0) {
                 setPositions({})
                 setWalletPositions({})
@@ -1518,7 +1502,8 @@ export default function useTokenPnl({
             for (const wallet of allWalletAddresses) {
                 for (const token of trackedTokens) {
                     try {
-                        let raw = safeLocalStorageGet(`token_pnl_wallet_v41:${wallet}:${token}`)
+                        let raw = safeLocalStorageGet(`token_pnl_wallet_v42:${wallet}:${token}`)
+                        if (!raw) raw = safeLocalStorageGet(`token_pnl_wallet_v41:${wallet}:${token}`)
                         if (!raw) raw = safeLocalStorageGet(`token_pnl_wallet_v40:${wallet}:${token}`)
                         if (!raw) raw = safeLocalStorageGet(`token_pnl_wallet_v37:${wallet}:${token}`)
                         if (!raw) raw = safeLocalStorageGet(`token_pnl_wallet_v34:${wallet}:${token}`)
@@ -1535,16 +1520,23 @@ export default function useTokenPnl({
             }
             if (Object.keys(warmWalletPositions).length > 0) setWalletPositions(warmWalletPositions)
 
+            // V144: cache-first coordination with HEX DCA. App.jsx deliberately
+            // keeps live Token P&L explorer scans paused while HEX DCA is doing its
+            // Blockscout-heavy work, but cached wallet ledgers should still hydrate
+            // immediately. This gives the watchlist useful P&L values during DCA
+            // without making both pipelines compete for Blockscout/CORS/retries.
+            if (!enabled) {
+                setLoading(false)
+                setErrors([])
+                setActiveTokens([])
+                setProgress({ stage: "waiting-dca", current: 0, total: trackedTokens.length })
+                return
+            }
+
             setLoading(true)
             setErrors([])
             setActiveTokens([])
-            setProgress({ stage: "transfers", current: 0, total: 0 })
-
-            console.info("Token P&L v34 START", JSON.stringify({
-                wallets: allWalletAddresses.length,
-                visibleWallets: visibleWalletAddresses.length,
-                trackedTokens: trackedTokens.length
-            }))
+            setProgress({ stage: "transfers", current: 0, total: trackedTokens.length })
 
             try {
                 const walletSet = new Set(allWalletAddresses)
@@ -1556,15 +1548,26 @@ export default function useTokenPnl({
                  * hide ERC-20 movements from transaction summaries; the transfer
                  * index contains the actual wallet movements we need for cost basis.
                  */
-                // V10 scans BOTH sides of the PulseChain fork. Tokens such as copied
-                // DAI/WBTC/HEX may have entered the wallet on Ethereum before the
-                // snapshot and therefore have no PulseChain acquisition transfer at all.
+                // V154: Token Watchlist tracks PulseChain assets. Do NOT perform the
+                // generic pre-fork Ethereum wallet-history scan here. That scan was
+                // downloading thousands of unrelated Ethereum transfers for every
+                // wallet, causing 429s and adding minutes before PulseChain P&L could
+                // even begin. Token Watchlist basis is now built from PulseChain
+                // history only. PRVX sacrifice discovery remains a separate, targeted
+                // Ethereum scan below when PRVX is actually tracked.
                 const transferResults = {}
-                for (const network of ["ethereum", "mainnet"]) {
+                for (const network of ["mainnet"]) {
                     transferResults[network] = { transfers: {}, errors: {} }
 
-                    for (const wallet of allWalletAddresses) {
+                    for (let walletIndex = 0; walletIndex < allWalletAddresses.length; walletIndex += 1) {
+                        const wallet = allWalletAddresses[walletIndex]
                         if (cancelled) return
+                        setProgress({
+                            stage: network === "ethereum" ? "ethereum-transfers" : "pulsechain-transfers",
+                            current: walletIndex,
+                            total: allWalletAddresses.length,
+                            wallet
+                        })
                         const cachedTransferState = readTransferCache(network, wallet)
                         let accumulatedTransfers = cachedTransferState.transfers
                         const ethereumHistoryComplete = network === "ethereum" && cachedTransferState.complete
@@ -1575,7 +1578,13 @@ export default function useTokenPnl({
                         // that boundary block, which protects against app shutdowns
                         // in the middle of a page.
                         if (!ethereumHistoryComplete) {
-                            const startBlock = Math.max(0, Number(cachedTransferState.lastBlock ?? 0))
+                            const hasCachedHistory = cachedTransferState.transfers.length > 0 && Number(cachedTransferState.lastBlock ?? 0) > 0
+                            // V155: once a wallet has a persisted ledger, refresh ONLY blocks
+                            // after the last successful scan. The old boundary replay was safe
+                            // but needlessly re-requested already-accounted history every launch.
+                            const startBlock = hasCachedHistory
+                                ? Math.max(0, Number(cachedTransferState.lastBlock ?? 0) + 1)
+                                : 0
                             const endBlock = network === "ethereum"
                                 ? ETHEREUM_FORK_BLOCK - 1
                                 : 99999999
@@ -1586,10 +1595,19 @@ export default function useTokenPnl({
                                     network,
                                     settings,
                                     {
-                                        maxPages: 250,
-                                        pageSize: 250,
-                                        delayBetweenPages: 120,
-                                        retryAttempts: 4,
+                                        // V146: Ethereum's immutable pre-fork history is small enough
+                                        // to request in large pages. The old 250-row pagination turned a
+                                        // ~3.4k-transfer history into many Blockscout calls and repeatedly
+                                        // tripped the public API's rate limit. Keep PulseChain unchanged.
+                                        maxPages: network === "ethereum" ? 8 : (hasCachedHistory ? 20 : 250),
+                                        pageSize: network === "ethereum" ? 10000 : (hasCachedHistory ? 10000 : 250),
+                                        delayBetweenPages: network === "ethereum" ? 250 : (hasCachedHistory ? 40 : 120),
+                                        retryAttempts: network === "ethereum" ? 2 : (hasCachedHistory ? 1 : 3),
+                                        // V151: the shared Ethereum gate now reserves unique request slots
+                                        // before sleeping, eliminating synchronized request bursts. 1.5s
+                                        // spacing is enough to remain polite without turning five wallet
+                                        // histories into a multi-minute pre-scan.
+                                        minimumSpacingMs: network === "ethereum" ? 3000 : (hasCachedHistory ? 350 : 1800),
                                         startBlock,
                                         endBlock,
                                         onPage: info => {
@@ -1613,8 +1631,9 @@ export default function useTokenPnl({
                                             if (cancelled) return
                                             setProgress({
                                                 stage: network === "ethereum" ? "ethereum-transfers" : "pulsechain-transfers",
-                                                current: Number(info?.page ?? 0),
-                                                total: 0,
+                                                current: walletIndex,
+                                                total: allWalletAddresses.length,
+                                                page: Number(info?.page ?? 0),
                                                 collected: accumulatedTransfers.length || Number(info?.collected ?? 0),
                                                 wallet: info?.address
                                             })
@@ -1653,8 +1672,6 @@ export default function useTokenPnl({
                         errors: result?.errors ?? {}
                     }])
                 )
-                console.info("Token P&L v18 TRANSFERS", JSON.stringify(transferSummary))
-
                 const scanErrors = Object.entries(transferResults).flatMap(([network, result]) =>
                     Object.entries(result?.errors ?? {}).map(([wallet, message]) => ({ network, wallet, message }))
                 )
@@ -1668,18 +1685,43 @@ export default function useTokenPnl({
                 let prvxSacrificeTransfers = []
                 let prvxNativeSacrifices = []
                 if (trackedTokenSet.has(PRVX_ADDRESS)) {
+                    // V158: scan the sacrifice RECIPIENT once instead of scanning every
+                    // tracked PulseChain wallet independently. One recipient scan covers every
+                    // tracked wallet and avoids redundant per-wallet sacrifice-history crawls.
+                    // tracked wallet, then we partition the results into the permanent
+                    // per-wallet sacrifice caches below.
+                    const missingWallets = allWalletAddresses.filter(wallet => !readPrvxSacrificeCache(wallet)?.complete)
+                    let sharedTokenSacrifices = []
+                    if (missingWallets.length > 0) {
+                        try {
+                            sharedTokenSacrifices = await fetchCompleteAddressTokenTransfers(
+                                PRVX_SACRIFICE_ADDRESS, "mainnet", settings,
+                                {
+                                    maxPages: 50,
+                                    pageSize: 10000,
+                                    delayBetweenPages: 500,
+                                    retryAttempts: 4,
+                                    minimumSpacingMs: 5000,
+                                    startBlock: PRVX_SACRIFICE_START_BLOCK,
+                                    endBlock: PRVX_SACRIFICE_END_BLOCK
+                                }
+                            )
+                        } catch (error) {
+                            // Do not poison the permanent cache with a partial explorer scan.
+                            // Existing completed wallet caches remain usable and a future run
+                            // can retry the shared recipient scan.
+                            sharedTokenSacrifices = []
+                        }
+                    }
+
                     for (const wallet of allWalletAddresses) {
                         if (cancelled) return
                         let cachedSac = readPrvxSacrificeCache(wallet)
-                        if (!cachedSac?.complete) {
+                        if (!cachedSac?.complete && sharedTokenSacrifices.length > 0) {
                             try {
-                                const tokenTransfers = await fetchCompleteAddressTokenTransfers(
-                                    wallet, "ethereum", settings,
-                                    { maxPages: 50, pageSize: 250, delayBetweenPages: 80, retryAttempts: 3,
-                                      startBlock: PRVX_SACRIFICE_START_BLOCK, endBlock: PRVX_SACRIFICE_END_BLOCK }
-                                )
-                                const outgoing = tokenTransfers.filter(t =>
-                                    normalizeAddress(t?.from) === normalizeAddress(wallet) &&
+                                const normalizedWallet = normalizeAddress(wallet)
+                                const outgoing = sharedTokenSacrifices.filter(t =>
+                                    normalizeAddress(t?.from) === normalizedWallet &&
                                     normalizeAddress(t?.to) === PRVX_SACRIFICE_ADDRESS
                                 )
                                 const native = await fetchPrvxNativeSacrifices(wallet, settings)
@@ -1691,10 +1733,6 @@ export default function useTokenPnl({
                         prvxSacrificeTransfers.push(...(cachedSac?.tokenTransfers ?? []))
                         prvxNativeSacrifices.push(...(cachedSac?.native ?? []))
                     }
-                    console.info("Token P&L v28 PRVX SACRIFICE SCAN", JSON.stringify({
-                        tokenTransfers: prvxSacrificeTransfers.length,
-                        nativeTransfers: prvxNativeSacrifices.length
-                    }))
                 }
 
                 // De-duplicate logs per network. Ethereum and PulseChain share many
@@ -1771,10 +1809,6 @@ export default function useTokenPnl({
                     .filter(event => Number.isFinite(event.timestamp) && event.timestamp > 0)
                     .sort((a, b) => a.timestamp - b.timestamp || a.blockNumber - b.blockNumber)
 
-                console.info("Token P&L v18 EVENTS", JSON.stringify({
-                    uniqueTransfers: uniqueTransfers.size,
-                    transactionEvents: events.length
-                }))
 
                 // Fetch metadata for held assets plus assets that actually left the
                 // wallet in a tracked acquisition transaction.
@@ -1798,19 +1832,7 @@ export default function useTokenPnl({
                 const allInfoTokens = [...new Set([...trackedTokens, ...paymentTokenSet])]
                 const tokenInfo = await batchFetchTokenInfo(allInfoTokens, "mainnet", settings)
                 if (cancelled) return
-                console.info("Token P&L v18 TOKEN INFO", JSON.stringify({
-                    requested: allInfoTokens.length,
-                    resolved: Object.keys(tokenInfo ?? {}).length
-                }))
 
-                console.info("Token P&L v18 EVENT SAMPLE", JSON.stringify(events.slice(0, 8).map(event => ({
-                    network: event.network,
-                    hash: event.hash,
-                    timestamp: event.timestamp,
-                    method: event.method,
-                    deltas: Object.fromEntries(Object.entries(event.deltas).filter(([,v]) => v !== 0n).map(([k,v]) => [k, v.toString()])),
-                    transferCount: event.transfers.length
-                }))))
 
                 let workingPositions = trackedTokens.reduce((acc, token) => {
                     acc[token] = {
@@ -1852,10 +1874,6 @@ export default function useTokenPnl({
                 ) {
                     workingPositions = savedAccounting.positions
                     accountingStartIndex = Number(savedAccounting.nextEventIndex)
-                    console.info("Token P&L v18 ACCOUNTING RESUME", JSON.stringify({
-                        nextEventIndex: accountingStartIndex,
-                        totalEvents: events.length
-                    }))
                 }
 
                 const historicalPriceCache = new Map()
@@ -1885,28 +1903,61 @@ export default function useTokenPnl({
                         const futureTs = Number(timestamp) + days * 86400
                         const future = await getHistoricalPrice(token, futureTs, network)
                         if (Number.isFinite(future) && future > 0) {
-                            console.info("Token P&L v37 WPLS BOOTSTRAP PRICE", JSON.stringify({
-                                originalTimestamp: Number(timestamp),
-                                pricedTimestamp: futureTs,
-                                daysForward: days,
-                                price: future
-                            }))
                             return { price: future, bootstrapDays: days }
                         }
                     }
                     return { price: null, bootstrapDays: null }
                 }
 
+                // V149: Native-payment fallback no longer goes straight to Blockscout.
+                // The only fields this path needs are tx.from + tx.value, which an RPC
+                // can provide directly. On Ethereum this removes a potentially large
+                // second wave of Blockscout requests after wallet transfer discovery --
+                // the pattern that was still producing 429s even after V146/V148 made
+                // the transfer pages much larger. Explorer detail remains a last-resort
+                // fallback so behavior is preserved if every configured RPC misses.
                 const txDetailCache = new Map()
+                const rpcProviderCache = new Map()
                 const getTransactionDetail = async event => {
-                    const key = `${event.network}:${event.hash}`
+                    const network = event.network ?? "mainnet"
+                    const key = `${network}:${event.hash}`
                     if (txDetailCache.has(key)) return txDetailCache.get(key)
+
+                    const rpcUrls = [...new Set([
+                        ...(settings?.rpcs?.[network] ?? []),
+                        ...(defaultSettings?.rpcs?.[network] ?? [])
+                    ].filter(Boolean))]
+
+                    for (const rpcUrl of rpcUrls) {
+                        try {
+                            if (!rpcProviderCache.has(rpcUrl)) {
+                                rpcProviderCache.set(rpcUrl, new ethers.providers.JsonRpcProvider(rpcUrl))
+                            }
+                            const tx = await promiseWithTimeout(
+                                rpcProviderCache.get(rpcUrl).getTransaction(event.hash),
+                                8000
+                            )
+                            if (tx) {
+                                const detail = {
+                                    ...tx,
+                                    from: tx.from ?? null,
+                                    value: tx.value?.toString?.() ?? String(tx.value ?? "0"),
+                                    pnl_detail_source: "rpc"
+                                }
+                                txDetailCache.set(key, detail)
+                                return detail
+                            }
+                        } catch {
+                            // Try the next configured RPC before touching Blockscout.
+                        }
+                    }
+
                     try {
                         const detail = await fetchExplorerTransaction(
                             event.hash,
-                            event.network ?? "mainnet",
+                            network,
                             settings,
-                            { retryAttempts: 3 }
+                            { retryAttempts: network === "ethereum" ? 2 : 3, minimumSpacingMs: network === "ethereum" ? 6500 : 1800 }
                         )
                         txDetailCache.set(key, detail ?? null)
                         return detail ?? null
@@ -2630,7 +2681,6 @@ export default function useTokenPnl({
                                                 nativeBasis += residual * earliest.price
                                                 nativeUnits += residual
                                                 pricedIncoming += 1
-                                                console.info('Token P&L v40 PLS GENESIS/UNKNOWN BASELINE', JSON.stringify({ wallet, residualUnits: residual, price: earliest.price, pricedTimestamp: earliest.timestamp }))
                                             } else {
                                                 unpricedIncoming += 1
                                             }
@@ -2647,7 +2697,6 @@ export default function useTokenPnl({
                                                 nativeBasis += unitsStillHeld * earliest.price
                                                 pricedIncoming += 1
                                                 unpricedIncoming = 0
-                                                console.info('Token P&L v40 PLS UNPRICED BASELINE', JSON.stringify({ wallet, units: unitsStillHeld, price: earliest.price, pricedTimestamp: earliest.timestamp }))
                                             }
                                         }
                                         nativeLedger = writePlsNativeCache(wallet, {
@@ -2668,7 +2717,6 @@ export default function useTokenPnl({
                                 } else if (nativeCurrentUnits > 0) {
                                     position.unpricedAcquisitionCount += 1
                                 }
-                                console.info('Token P&L v41 PLS NATIVE LEDGER', JSON.stringify({ wallet, nativeCurrentUnits, units: nativeLedger?.units ?? 0, costBasisUsd: nativeLedger?.costBasisUsd ?? 0, complete: nativeLedger?.complete === true }))
                             }
 
                             // V41 final Pulse reconciliation. The UI intentionally displays
@@ -2707,11 +2755,6 @@ export default function useTokenPnl({
                                         // The remaining current position now has a basis. Historical
                                         // unpriced events no longer need to suppress the current P&L.
                                         position.unpricedAcquisitionCount = 0
-                                        console.info('Token P&L v41 PLS CURRENT-BALANCE BASELINE', JSON.stringify({
-                                            wallet, reconstructedBefore: actualCombinedUnits - residualUnits,
-                                            residualUnits, actualCombinedUnits, price: earliest.price,
-                                            pricedTimestamp: earliest.timestamp
-                                        }))
                                     }
                                 }
                             }
@@ -2738,61 +2781,11 @@ export default function useTokenPnl({
                         writeWalletTokenCache(wallet, targetToken, finalPosition, walletFingerprint(wallet))
                     }
 
-                    if (targetToken === HEX_ADDRESS || targetToken === WPLS_ADDRESS) {
-                        const ledgerDiagnostics = Object.fromEntries(allWalletAddresses.map(wallet => {
-                            const reconstructedUnits = Number(finalPerWallet[wallet]?.units ?? 0)
-                            const currentUnits = Number(currentBalances?.[wallet]?.balances?.[targetToken]?.normalized ?? 0)
-                            const coverage =
-                                currentUnits > 0 && reconstructedUnits > 0
-                                    ? Math.min(reconstructedUnits / currentUnits, currentUnits / reconstructedUnits)
-                                    : 0
-
-                            return [wallet, {
-                                currentUnits,
-                                reconstructedUnits,
-                                coveragePercent: Number((coverage * 100).toFixed(4)),
-                                costBasisUsd: Number(finalPerWallet[wallet]?.costBasisUsd ?? 0),
-                                averageEntry: Number(finalPerWallet[wallet]?.averageEntry ?? 0),
-                                stakedUnits: Number(finalPerWallet[wallet]?.stakedUnits ?? 0),
-                                stakedCostBasisUsd: Number(finalPerWallet[wallet]?.stakedCostBasisUsd ?? 0),
-                                stakeEstimatedBasisUnits: Number(finalPerWallet[wallet]?.stakeEstimatedBasisUnits ?? 0),
-                                pricedAcquisitions: Number(finalPerWallet[wallet]?.pricedAcquisitionCount ?? 0),
-                                unpricedAcquisitions: Number(finalPerWallet[wallet]?.unpricedAcquisitionCount ?? 0),
-                                unknownDisposedUnits: Number(finalPerWallet[wallet]?.unknownDisposedUnits ?? 0),
-                                complete: finalPerWallet[wallet]?.complete !== false,
-                                basisMethod: finalPerWallet[wallet]?.basisMethod ?? null
-                            }]
-                        }))
-
-                        // WARNING level on purpose: packaged Electron builds can hide INFO
-                        // messages depending on DevTools' level/filter settings.
-                        console.warn(
-                            `========== ${targetToken === HEX_ADDRESS ? "HEX" : "PLS+WPLS"} P&L WALLET DIAGNOSTICS ==========\n` +
-                            JSON.stringify(ledgerDiagnostics, null, 2) +
-                            `\n========== END ${targetToken === HEX_ADDRESS ? "HEX" : "PLS+WPLS"} P&L WALLET DIAGNOSTICS ==========`
-                        )
-                    }
-
-                    if (targetToken === PRVX_ADDRESS) {
-                        console.info("Token P&L v33 PRVX WALLET BASELINES", JSON.stringify(
-                            Object.fromEntries(allWalletAddresses.map(wallet => [wallet, {
-                                units: finalPerWallet[wallet]?.units ?? 0,
-                                costBasisUsd: finalPerWallet[wallet]?.costBasisUsd ?? 0,
-                                tokensPerUsd: PRVX_MAX_RETURN_TOKENS_PER_USD
-                            }]))
-                        ))
-                    }
 
                     publishTokenWalletPositions(targetToken, finalPerWallet)
                     completedTokenCount += 1
                     setProgress({ stage: "token-complete", current: completedTokenCount, total: orderedTokens.length, token: symbol })
-                    console.info("Token P&L v41 TOKEN COMPLETE", JSON.stringify({
-                        index: tokenIndex + 1,
-                        total: orderedTokens.length,
-                        token: targetToken,
-                        symbol,
-                        walletsCached: allWalletAddresses.length
-                    }))
+
                 }
 
                 // V38: track every token worker independently. The UI previously only
@@ -2809,12 +2802,15 @@ export default function useTokenPnl({
                     }
                 }
 
-                // Two token workers substantially improve first-run speed while keeping
-                // historical RPC pressure bounded. The lower-level on-chain price fetcher
-                // already has its own concurrency cap, so going much wider here would mostly
-                // increase rate-limit errors rather than reduce wall-clock time.
+                // V43: Run six independent token ledgers concurrently. V151 already used
+                // four workers, but cold-cache testing still took ~18 minutes end-to-end.
+                // Spread the RPC work across six coins and four historical-day workers per
+                // coin. Explorer history remains separately rate-limited, so this only
+                // increases the RPC-based historical-price phase. Blockscout history preparation remains
+                // behind its own global slot reservation, so this does not reintroduce the
+                // bursty Ethereum explorer traffic fixed in V151.
                 let nextTokenIndex = 0
-                const tokenWorkerCount = Math.min(2, orderedTokens.length)
+                const tokenWorkerCount = Math.min(6, orderedTokens.length)
                 const tokenWorker = async () => {
                     while (!cancelled) {
                         const index = nextTokenIndex++
@@ -2823,12 +2819,7 @@ export default function useTokenPnl({
                     }
                 }
                 await Promise.all(Array.from({ length: tokenWorkerCount }, () => tokenWorker()))
-                console.info("Token P&L v36 WALLET CACHE COMPLETE", JSON.stringify({
-                    wallets: allWalletAddresses.length,
-                    tokens: orderedTokens.length,
-                    tokenWorkers: tokenWorkerCount,
-                    errors: scanErrors.length
-                }))
+
                 safeLocalStorageRemove(getAccountingCheckpointKey(walletKey, tokenKey))
                 safeLocalStorageRemove(getCheckpointKey(walletKey, tokenKey))
                 if (!cancelled) setErrors(scanErrors)

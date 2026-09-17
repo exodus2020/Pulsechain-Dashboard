@@ -1,5 +1,6 @@
 //stake component
 import styled from "styled-components"
+import { useEffect } from "react"
 import { addCommasToNumber, fUnit } from "../../lib/numbers"
 import ImageContainer from "../ImageContainer"
 import imgHex from '../../icons/hex.png'
@@ -130,41 +131,31 @@ export function StakeComponent({hexData, hexDcaData, hexTokenPnl, hexWalletPosit
         const current = Number(dcaProgress.current ?? 0)
         const total = Number(dcaProgress.total ?? 0)
 
-        if (!dcaLoading) {
-            return ""
-        }
+        if (!dcaLoading) return ""
 
         if (dcaProgress.stage === "history") {
-
-            const network =
-                dcaProgress.network === "ethereum"
-                    ? "Ethereum"
-                    : "PulseChain"
-
-            const collected =
-                Number(
-                    dcaProgress.collected ?? 0
-                )
-
-            return current > 0
-                ? `${network} • Page ${current}${
-                    collected > 0
-                        ? ` (${collected} tx)`
-                        : ""
-                }`
-                : `Fetching ${network} history`
+            // v121: both discovery jobs run concurrently. Show both counters at
+            // once instead of whichever network happened to report progress last.
+            const hp = dcaProgress.historyProgress ?? {}
+            const pulsechain = hp.pulsechain ?? hp.mainnet ?? { current: 0 }
+            const ethereum = hp.ethereum ?? { current: 0 }
+            const plsPage = Number(pulsechain.current ?? 0)
+            const ethPage = Number(ethereum.current ?? 0)
+            return `PulseChain History\nPage ${plsPage || 1}\nEthereum History\nPage ${ethPage || 1}`
         }
 
         if (dcaProgress.stage === "transactions") {
-            return total > 0
-                ? `Checking transaction ${current} of ${total}`
-                : "Finding HEX purchases"
+            const np = dcaProgress.networkProgress ?? {}
+            const pulsechain = np.pulsechain ?? { current: 0, total: 0 }
+            const mainnet = np.mainnet ?? { current: 0, total: 0 }
+            const plsCurrent = Number(pulsechain.current ?? 0) + Number(mainnet.current ?? 0)
+            const plsTotal = Number(pulsechain.total ?? 0) + Number(mainnet.total ?? 0)
+            const eth = np.ethereum ?? { current: 0, total: 0 }
+            return `PulseChain Purchases\n${plsCurrent} of ${plsTotal}\nEthereum Purchases\n${Number(eth.current ?? 0)} of ${Number(eth.total ?? 0)}`
         }
 
         if (dcaProgress.stage === "pricing") {
-            return total > 0
-                ? `Pricing purchase ${current} of ${total}`
-                : "Retrieving historical prices"
+            return total > 0 ? `Pricing purchase\n${current} of ${total}` : "Retrieving historical prices"
         }
 
         return "Preparing DCA calculation"
@@ -481,6 +472,7 @@ export function StakeComponent({hexData, hexDcaData, hexTokenPnl, hexWalletPosit
         : null
 
 
+
     const dcaUnpricedCount =
         Number(
             hexDcaData?.stats?.unpricedPurchaseCount ?? 0
@@ -578,11 +570,25 @@ const fitPnlFontSize = value => {
     if (length >= 12) return 19
     return 23
 }
+    const dcaLoadingLabel = (() => {
+        if (!dcaLoading) return ""
+        if (dcaProgress.stage === "history") return "Scanning"
+        if (dcaProgress.stage === "transactions") return "Verifying"
+        if (dcaProgress.stage === "pricing") return "Calculating"
+        return "Loading"
+    })()
+
+    // V156: The DCA Price card represents the purchase-weighted DCA for the
+    // currently visible wallet set.  Do not display the miner/stake basis here:
+    // that basis is intentionally derived from active stake positions and can
+    // remain unchanged when a wallet with no active stake is shown/hidden.
+    // useHexDca already recomputes dcaPrice from visible purchases whenever
+    // hiddenWallets changes, so the card must render that value directly.
     const dcaDisplay =
         dcaLoading
-            ? "Loading"
-            : hasEffectiveDcaPrice
-                ? `$ ${effectiveDcaPrice.toFixed(6)}`
+            ? dcaLoadingLabel
+            : hasDcaPrice
+                ? `$ ${dcaPrice.toFixed(6)}`
                 : "$ N/A"
 
     const dcaTooltip = dcaLoading
@@ -993,8 +999,9 @@ const fitPnlFontSize = value => {
 
                         <div
                             style={{
-                                marginTop: 6,
-                                fontSize: dcaLoading ? 20 : 25
+                                marginTop: 1,
+                                fontSize: dcaLoading ? 21 : 25,
+                                lineHeight: 1
                             }}
                         >
                             {dcaDisplay}
@@ -1002,10 +1009,12 @@ const fitPnlFontSize = value => {
                             {dcaLoading && dcaProgressText && (
                                 <div
                                     style={{
-                                        marginTop: 7,
+                                        marginTop: 3,
                                         fontSize: 12,
-                                        opacity: 0.7,
-                                        lineHeight: 1.25
+                                        color: "#8f98a3",
+                                        opacity: 1,
+                                        lineHeight: 1.08,
+                                        whiteSpace: "pre-line"
                                     }}
                                 >
                                     {dcaProgressText}

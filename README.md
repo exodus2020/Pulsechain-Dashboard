@@ -4,6 +4,46 @@ Privacy-first PulseChain portfolio tracker with real-time pricing, historical co
 
 > Built for privacy. Runs locally. No tracking. No middlemen.
 
+## 🚀 v2.4.1 — HEX DCA, Active-Stake Cost Basis & Performance
+
+Version 2.4.1 focuses on **HEX cost-basis accuracy, active-stake P&L, multi-wallet accounting, and dramatically faster cached startup**, while preserving the Scenario Mode introduced in v2.4.0.
+
+### ⛏️ Active HEX Stake Cost Basis & P&L
+- Reworked HEX Miner cost basis so active stakes use the purchase basis associated with each selected wallet's live stake principal.
+- Added wallet-by-wallet active-stake basis calculations and amount-weighted aggregation when multiple wallets are selected.
+- Miner DCA now reflects the weighted entry price of the HEX principal represented by the currently visible active stakes.
+- Active Stake P&L compares current stake-principal value against reconstructed historical spend.
+- Wallet filtering now recalculates active-stake DCA and P&L using only the selected wallets.
+
+### 🔎 Lifetime HEX Purchase History
+- Expanded HEX purchase reconstruction across both **Ethereum and PulseChain**.
+- Added separate Ethereum and PulseChain purchase counts, HEX purchased, historical spend, and average entry prices.
+- Added a combined lifetime purchase-history summary without mixing it with the active-stake basis used by HEX Miner P&L.
+- Preserved Ethereum HEX purchase discovery while improving PulseChain purchase-history handling.
+
+### 👛 Multi-Wallet HEX Accounting
+- Added per-wallet HEX purchase breakdowns in the Miner Details panel.
+- Each wallet can display its reconstructed purchase DCA, historical spend, current principal value, return, HEX amount, and purchase count.
+- Combined-wallet Miner DCA is weighted from the selected wallets' individual active-stake bases rather than treating all historical purchases as one undifferentiated pool.
+- Wallet combinations update the HEX Miner analytics consistently as wallets are shown or hidden.
+
+### ⚡ Caching & Startup Performance
+- Improved reuse of reconstructed HEX history and cost-basis data between sessions.
+- Cached portfolio data can now restore HEX DCA/P&L analytics without repeating the full historical scan.
+- Reduced unnecessary historical requests and recalculation during wallet switching.
+- Significantly improved warm/cached application startup and portfolio restoration.
+
+### 🧾 Miner Details & Reliability
+- Expanded the **Details** panel with Active Stake Weighted Entry, current price/value, total spent, active staked HEX, and active-stake P&L.
+- Added a Lifetime Purchase History section with Ethereum and PulseChain network breakdowns.
+- Added a Wallet Purchase Breakdown for easier validation of individual wallet cost bases.
+- Improved handling of wallets with Ethereum-only, PulseChain-only, mixed-chain, or no active HEX stakes.
+- Preserved Scenario Mode behavior: projected HEX prices affect stake values and P&L while historical DCA/cost basis remains unchanged.
+
+> **Note:** HEX DCA and P&L values are estimates reconstructed from available on-chain transaction history and historical pricing. They are intended for portfolio analytics and may differ from tax or accounting cost basis.
+
+---
+
 ## 🚀 v2.4.0 — Scenario Mode & Saved Price Presets
 
 Version 2.4.0 introduces **Scenario Mode**, a forward-looking portfolio simulator for exploring hypothetical PulseChain token prices without changing wallet balances, token quantities, or protocol reward rates.
@@ -258,6 +298,7 @@ All data is stored locally and encrypted for maximum privacy.
 * 🌾 View farming positions, rewards, and estimated INC/day
 * 🧾 HEX stake tracking and analytics
 * ⛏️ Active HEX Miner DCA, cost basis, and P&L tracking
+* 🔎 Detailed active-stake and lifetime HEX purchase breakdowns by wallet and network
 * 📈 Lifetime HEX DCA tracking across Ethereum & PulseChain
 * 📉 Real-time token pricing and historical price charts
 * 🔎 Scan wallets for PulseChain tokens and manage custom watchlists
