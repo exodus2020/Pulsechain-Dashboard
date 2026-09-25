@@ -255,7 +255,24 @@ export default function useTokenSearch ({searchTerm, filter = true, wallets, wat
                 return result
             }).filter(f => f !== undefined)
            
-            setData(lpDataModified ?? [])
+            // A token can have more than one PulseX pair (for example a WPLS
+            // pair plus another routing/liquidity pair). The watchlist represents
+            // tokens, not pools, so collapse search results to one row per token
+            // contract. Prefer the deepest WPLS pair when more than one exists.
+            const uniqueTokenResults = Array.from(
+                (lpDataModified ?? []).reduce((byToken, item) => {
+                    const tokenAddress = String(item?.a ?? '').toLowerCase()
+                    if (!tokenAddress) return byToken
+
+                    const current = byToken.get(tokenAddress)
+                    if (!current || Number(item?.reserveUSD ?? 0) > Number(current?.reserveUSD ?? 0)) {
+                        byToken.set(tokenAddress, item)
+                    }
+                    return byToken
+                }, new Map()).values()
+            )
+
+            setData(uniqueTokenResults)
 
             setIsScanning(false)
             return

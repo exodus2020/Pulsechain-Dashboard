@@ -1,6 +1,6 @@
 //stake component
 import styled from "styled-components"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { addCommasToNumber, fUnit } from "../../lib/numbers"
 import ImageContainer from "../ImageContainer"
 import imgHex from '../../icons/hex.png'
@@ -9,6 +9,7 @@ import { icons_list } from "../../config/icons"
 import { parseHexStats } from "../../lib/hex"
 import Tooltip from "../../shared/Tooltip"
 import { shortenString } from "../../lib/string"
+import Button from "../Button"
 
 const Wrapper = styled.div`
     color: white;
@@ -81,9 +82,164 @@ const Row = styled.div`
     }
 `
 
-export function StakeComponent({hexData, hexDcaData, hexTokenPnl, hexWalletPositions = {}, walletBalances = {}, hexPrice, hiddenWallets, disabled, visibleWallets, liquidHexUnits = 0, scenarioEnabled = false}) {
+const HexPurchaseTimeline = ({ purchases = [], hiddenWallets = [], visibleWallets = {}, summary = {} }) => {
+    const [hoveredBar, setHoveredBar] = useState(null)
+    const hidden = new Set((hiddenWallets ?? []).map(address => String(address ?? "").toLowerCase()))
+    const visible = new Set(Object.keys(visibleWallets ?? {}).map(address => String(address ?? "").toLowerCase()))
+    const sourceRows = (purchases ?? [])
+        .filter(p => {
+            const wallet = String(p?.wallet ?? "").toLowerCase()
+            return !hidden.has(wallet) && (visible.size === 0 || visible.has(wallet))
+        })
+        .map(p => {
+            const raw = p?.timestamp
+            const numeric = Number(raw)
+            const ms = Number.isFinite(numeric) ? (numeric > 1e12 ? numeric : numeric * 1000) : new Date(raw).getTime()
+            const amount = Number(p?.purchasedHex ?? p?.hexAmount ?? 0)
+            const isEthereum = p?.network === "ethereum" || p?.networkKey === "ethereum"
+            const isPulse = p?.network === "mainnet" || p?.network === "pulsechain" || p?.networkKey === "pulsechain" || p?.networkLabel === "PulseChain"
+            return { ...p, ms, amount, chain: isEthereum ? "ethereum" : isPulse ? "pulsechain" : null }
+        })
+        .filter(p => p.chain && Number.isFinite(p.ms) && Number.isFinite(p.amount) && p.amount > 0)
 
-    const formatTShares = (tShares) => hexData.stats.totalTShares < 100 ? tShares.toFixed(3) : `${fUnit(tShares, 2)}`
+    // One bar per chain/day. Multiple purchases on the same day are combined.
+    const daily = new Map()
+    sourceRows.forEach(p => {
+        const d = new Date(p.ms)
+        const dayMs = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+        const key = `${p.chain}:${dayMs}`
+        const spent = Number(p?.usdSpent)
+        const current = daily.get(key) ?? { chain: p.chain, ms: dayMs, amount: 0, usdSpent: 0, pricedHex: 0, count: 0 }
+        current.amount += p.amount
+        current.count += 1
+        if (Number.isFinite(spent) && spent > 0) {
+            current.usdSpent += spent
+            current.pricedHex += p.amount
+        }
+        daily.set(key, current)
+    })
+    const rows = [...daily.values()].sort((a, b) => a.ms - b.ms)
+
+    if (!rows.length) return <div style={{ padding: 24, textAlign: "center" }} className="mute">No cached HEX purchases available to graph.</div>
+
+    const minPurchase = rows[0].ms
+    const maxPurchase = rows[rows.length - 1].ms
+    const day = 86400000
+    const rawSpan = Math.max(day, maxPurchase - minPurchase)
+    const pad = Math.max(14 * day, rawSpan * 0.035)
+    const minTime = minPurchase - pad
+    const maxTime = maxPurchase + pad
+    const span = Math.max(day, maxTime - minTime)
+    const width = 800
+    const height = 585
+    const left = 92
+    const right = 18
+    const plotWidth = width - left - right
+    // One shared zero line: Ethereum grows upward, PulseChain grows downward.
+    // Each side still has its own independent Y scale based on the visible wallets.
+    const sharedBase = 270
+    const maxBarHeight = 200
+    const minBarHeight = 3
+    const barWidth = Math.max(1.25, Math.min(2.1, plotWidth / Math.max(rows.length * 7.5, 1)))
+    const ethAmounts = rows.filter(p => p.chain === "ethereum" && p.amount > 0).map(p => p.amount)
+    const pulseAmounts = rows.filter(p => p.chain === "pulsechain" && p.amount > 0).map(p => p.amount)
+    const ethMaxAmount = Math.max(...ethAmounts, 1)
+    const pulseMaxAmount = Math.max(...pulseAmounts, 1)
+    const ethMinAmount = Math.min(...ethAmounts, ethMaxAmount)
+    const pulseMinAmount = Math.min(...pulseAmounts, pulseMaxAmount)
+    const xFor = ms => left + ((ms - minTime) / span) * plotWidth
+    // Ethereum and PulseChain use independent Y scales. Wallet visibility is already
+    // applied above, so toggling wallets immediately recomputes both chain maxima.
+    const barHeight = (amount, chain) => {
+        const chainMax = chain === "ethereum" ? ethMaxAmount : pulseMaxAmount
+        const chainMin = chain === "ethereum" ? ethMinAmount : pulseMinAmount
+        const safeAmount = Math.max(Number(amount) || 0, 0)
+        const safeMax = Math.max(Number(chainMax) || 0, 1)
+        const safeMin = Math.max(Math.min(Number(chainMin) || 1, safeMax), Number.EPSILON)
+
+        // True dynamic log scale across the currently visible purchases on each chain.
+        // The smallest visible purchase gets a short bar, the largest gets full height,
+        // and purchases between them spread across the available height logarithmically.
+        // The separate transparent hover target below remains at least 14px tall.
+        if (safeAmount <= 0) return minBarHeight
+        if (safeMax <= safeMin) return maxBarHeight
+        const normalized = Math.log(safeAmount / safeMin) / Math.log(safeMax / safeMin)
+        return minBarHeight + Math.max(0, Math.min(1, normalized)) * (maxBarHeight - minBarHeight)
+    }
+    const tickCount = 6
+    const ticks = Array.from({ length: tickCount }, (_, i) => minTime + (span * i) / (tickCount - 1))
+    const dateLabel = ms => new Date(ms).toLocaleDateString(undefined, { month: "short", year: "numeric" })
+    const fullDate = ms => new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+
+    return <div style={{ marginTop: 14, padding: "16px 14px 12px", borderRadius: 10, background: "rgba(0,0,0,.42)", boxShadow: "0 1px 4px rgba(255,255,255,.1)" }}>
+        <div style={{ fontSize: 18, letterSpacing: .5, marginBottom: 4 }}>HEX Purchase History</div>
+        <div className="mute" style={{ fontSize: 12, marginBottom: 8 }}>Shared timeline • one bar per purchase day • hover a bar for purchase details</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, margin: "10px 0 14px" }}>
+            {[
+                ["HEX Purchased", summary.totalHex != null ? addCommasToNumber(Number(summary.totalHex).toFixed(0)) : "—"],
+                ["Total Spent", summary.totalSpent != null ? `$ ${addCommasToNumber(Number(summary.totalSpent).toFixed(2))}` : "—"],
+                ["Purchases", summary.purchaseCount ?? sourceRows.length],
+                ["Current HEX", summary.currentPrice != null ? `$ ${Number(summary.currentPrice).toFixed(6)}` : "—"]
+            ].map(([label, value]) => <div key={label} style={{ padding: "8px 10px", border: "1px solid rgba(255,255,255,.08)", borderRadius: 7, textAlign: "center" }}>
+                <div className="mute" style={{ fontSize: 11 }}>{label}</div>
+                <div style={{ fontSize: 15, marginTop: 2 }}>{value}</div>
+            </div>)}
+        </div>
+        <div style={{ position: "relative" }}>
+            <svg viewBox={`0 0 ${width} ${height}`} width="100%" role="img" aria-label="Ethereum and PulseChain HEX purchase history on a shared timeline">
+                {ticks.map((tick, index) => {
+                    const x = xFor(tick)
+                    return <g key={tick}>
+                        <line x1={x} x2={x} y1="28" y2="527" stroke="rgba(255,255,255,.07)" strokeWidth="1"/>
+                        <text x={x} y="552" fill="rgb(145,145,145)" fontSize="11" textAnchor={index === 0 ? "start" : index === tickCount - 1 ? "end" : "middle"}>{dateLabel(tick)}</text>
+                    </g>
+                })}
+                <text x="8" y="112" fill="#8fbfff" fontSize="14">Ethereum</text>
+                <text x="8" y="438" fill="#c59cff" fontSize="14">PulseChain</text>
+                <line x1={left} x2={width-right} y1={sharedBase} y2={sharedBase} stroke="rgba(255,255,255,.42)" strokeWidth="1"/>
+                {rows.map((p, index) => {
+                    const h = barHeight(p.amount, p.chain)
+                    const fill = p.chain === "ethereum" ? "#8fbfff" : "#c59cff"
+                    const x = xFor(p.ms)
+                    const visibleY = p.chain === "ethereum" ? sharedBase - h : sharedBase
+                    const hoverH = Math.max(h, 14)
+                    const hoverY = p.chain === "ethereum" ? sharedBase - hoverH : sharedBase
+                    return <g key={`${p.chain}-${p.ms}-${index}`}>
+                        <rect x={x - barWidth/2} y={visibleY} width={barWidth} height={h} rx="1" fill={fill} opacity=".9"/>
+                        <rect
+                            x={x - 5} y={hoverY} width="10" height={hoverH}
+                            fill="transparent" style={{ cursor: "pointer" }}
+                            onMouseEnter={e => setHoveredBar({ p, clientX: e.clientX, clientY: e.clientY })}
+                            onMouseMove={e => setHoveredBar({ p, clientX: e.clientX, clientY: e.clientY })}
+                            onMouseLeave={() => setHoveredBar(null)}
+                        />
+                    </g>
+                })}
+                <text x={(left + width-right)/2} y="578" fill="rgb(175,175,175)" fontSize="12" textAnchor="middle">Time</text>
+            </svg>
+            {hoveredBar && (() => {
+                const p = hoveredBar.p
+                const avg = p.pricedHex > 0 && p.usdSpent > 0 ? p.usdSpent / p.pricedHex : null
+                return <div style={{
+                    position: "fixed", left: hoveredBar.clientX + 12, top: hoveredBar.clientY + 12,
+                    zIndex: 99999, pointerEvents: "none", background: "rgba(24,24,24,.98)", color: "white",
+                    border: "1px solid rgba(255,255,255,.18)", borderRadius: 7, padding: "9px 11px",
+                    fontSize: 12, lineHeight: 1.55, boxShadow: "0 4px 18px rgba(0,0,0,.45)", whiteSpace: "nowrap"
+                }}>
+                    <div>{fullDate(p.ms)}</div>
+                    <div>Total HEX Purchased: {addCommasToNumber(p.amount.toFixed(0))}</div>
+                    <div>Dollar Amount Paid: {p.usdSpent > 0 ? `$ ${addCommasToNumber(p.usdSpent.toFixed(2))}` : "N/A"}</div>
+                    <div>Avg/HEX: {avg ? `$ ${avg.toFixed(6)}` : "N/A"}</div>
+                </div>
+            })()}
+        </div>
+    </div>
+}
+
+export function StakeComponent({hexData, hexDcaData, hexTokenPnl, hexWalletPositions = {}, walletBalances = {}, hexPrice, hiddenWallets, disabled, visibleWallets, liquidHexUnits = 0, scenarioEnabled = false, minerDetailsOpen = false, onToggleMinerDetails}) {
+    const [showDcaDetails, setShowDcaDetails] = useState(false)
+
+    const formatTShares = (tShares) => Number(hexData?.stats?.totalTShares ?? 0) < 100 ? Number(tShares ?? 0).toFixed(3) : `${fUnit(Number(tShares ?? 0), 2)}`
     const formatLength = (length) => length < 364 ? `${length}d` : `${parseFloat(length / 365).toFixed(2)}y`
 
     const red = 'rgb(255,130,130)'
@@ -92,9 +248,10 @@ export function StakeComponent({hexData, hexDcaData, hexTokenPnl, hexWalletPosit
     const walletsToShow = Object.keys(visibleWallets ?? {}).map(key => key.toLowerCase())
 
     const stakes = hexData?.combinedStakes?.filter(stake => walletsToShow.includes(stake?.parent.toLowerCase() ?? ''))
-    const stats = hiddenWallets.length > 0 ? parseHexStats(stakes) : hexData?.stats
-
-    if (hexData?.combinedStakes?.length === 0) return ''
+    // Keep the HEX Miners summary visible even with zero tracked wallets/stakes.
+    // The empty state is a useful baseline UI and should show zero values rather
+    // than removing the entire section.
+    const stats = (hiddenWallets?.length ?? 0) > 0 ? (parseHexStats(stakes) ?? {}) : (hexData?.stats ?? {})
     
     const nextStakeAddress = stats?.nextStakeAddress ? shortenString(stats?.nextStakeAddress) : ''
     const nextStakeType = stats?.nextStakeType ? stats?.nextStakeType : ''
@@ -110,7 +267,7 @@ export function StakeComponent({hexData, hexDcaData, hexTokenPnl, hexWalletPosit
     const hexYield = stats?.totalHexYield ?? 0
     const hexYieldUsd = hexYield * hexUsd
 
-    const stakedHex = stats.totalStakedHex ?? 0
+    const stakedHex = stats?.totalStakedHex ?? 0
     const stakedHexUsd = stakedHex * hexUsd
 
     const hexBalance = stats?.totalFinalHex ?? 0
@@ -584,346 +741,70 @@ const fitPnlFontSize = value => {
     // remain unchanged when a wallet with no active stake is shown/hidden.
     // useHexDca already recomputes dcaPrice from visible purchases whenever
     // hiddenWallets changes, so the card must render that value directly.
+    // Keep the persisted DCA visible while the incremental checker looks only
+    // for purchases after the saved checkpoints. "Scanning" is reserved for a
+    // true cold start where no cached DCA exists yet.
     const dcaDisplay =
-        dcaLoading
+        dcaLoading && dcaProgress?.showPhases
             ? dcaLoadingLabel
             : hasDcaPrice
                 ? `$ ${dcaPrice.toFixed(6)}`
-                : "$ N/A"
+                : dcaLoading
+                    ? dcaLoadingLabel
+                    : "$ N/A"
+
+    const visibleAddressSet = new Set(Object.keys(visibleWallets ?? {}).map(a => String(a).toLowerCase()))
+    const hiddenAddressSet = new Set((hiddenWallets ?? []).map(a => String(a).toLowerCase()))
+    const visibleDcaPurchases = (hexDcaData?.purchases ?? []).filter(p => {
+        const wallet = String(p?.wallet ?? "").toLowerCase()
+        return !hiddenAddressSet.has(wallet) && (visibleAddressSet.size === 0 || visibleAddressSet.has(wallet))
+    })
+    const chainHex = visibleDcaPurchases.reduce((acc, p) => {
+        const amount = Number(p?.purchasedHex ?? p?.hexAmount ?? 0)
+        if (!Number.isFinite(amount) || amount <= 0) return acc
+        const isEth = p?.network === "ethereum" || p?.networkKey === "ethereum"
+        if (isEth) acc.ethereum += amount
+        else acc.pulsechain += amount
+        return acc
+    }, { ethereum: 0, pulsechain: 0 })
+
+    const visibleChainStats = visibleDcaPurchases.reduce((acc, p) => {
+        const amount = Number(p?.purchasedHex ?? p?.hexAmount ?? 0)
+        const spent = Number(p?.usdSpent ?? 0)
+        if (!Number.isFinite(amount) || amount <= 0) return acc
+        const isEth = p?.network === "ethereum" || p?.networkKey === "ethereum"
+        const key = isEth ? "ethereum" : "pulsechain"
+        acc[key].hex += amount
+        acc[key].count += 1
+        if (Number.isFinite(spent) && spent > 0) {
+            acc[key].spent += spent
+            acc[key].pricedHex += amount
+        }
+        return acc
+    }, { ethereum: { hex: 0, spent: 0, pricedHex: 0, count: 0 }, pulsechain: { hex: 0, spent: 0, pricedHex: 0, count: 0 } })
+    const chainAvg = s => s.pricedHex > 0 ? s.spent / s.pricedHex : null
+    const chainBreakdown = (label, stats, color) => <div style={{ marginTop: 12, color }}>
+        <strong>{label}</strong><br/>
+        Avg: {chainAvg(stats) ? `$ ${chainAvg(stats).toFixed(6)}` : "$ N/A"}<br/>
+        Spent: $ {addCommasToNumber(stats.spent.toFixed(2))}<br/>
+        {addCommasToNumber(stats.hex.toFixed(0))} HEX<br/>
+        {stats.count} purchase{stats.count === 1 ? "" : "s"}
+    </div>
 
     const dcaTooltip = dcaLoading
-    ? (
-        <div style={{ textAlign: "center" }}>
-            Retrieving lifetime HEX purchase history
-        </div>
-    )
-    : hasEffectiveDcaPrice
-        ? (
-            <div
-                style={{
-                    textAlign: "center",
-                    width: 280,
-                    maxWidth: "calc(100vw - 32px)",
-                    boxSizing: "border-box"
-                }}
-            >
-                <strong>{usesWalletAggregation ? "Active Stake Weighted Entry" : usesReconstructedDca ? "Estimated Active Stake Entry" : "Active Stake Entry"}</strong>
-                <br/>
-                $ {effectiveDcaPrice.toFixed(6)}
-
-                <br/><br/>
-
-                <strong>Current Price</strong>
-                <br/>
-                $ {Number(hexUsd ?? 0).toFixed(6)}
-
-                <br/><br/>
-
-                <strong>Current Value</strong>
-                <br/>
-                $ {addCommasToNumber(
-                    dcaCurrentValue.toFixed(2)
-                )}
-
-                <br/><br/>
-
-                <strong>Total Spent</strong>
-                <br/>
-                $ {addCommasToNumber(
-                    Number(effectiveDcaBasis ?? 0).toFixed(2)
-                )}
-
-                <br/><br/>
-
-                <strong>Active Staked HEX</strong>
-                <br/>
-                {addCommasToNumber(
-                    Number(actualStakeUnits ?? 0).toFixed(0)
-                )}
-
-                <br/><br/>
-                <strong>Active Stake P&amp;L</strong>
-                <br/>
-                {dcaProfit >= 0 ? "+" : "-"}$ {addCommasToNumber(
-                    Math.abs(Number(dcaProfit ?? 0)).toFixed(2)
-                )}
-                {Number.isFinite(dcaReturnPercent) && (
-                    <>
-                        <br/>
-                        {dcaReturnPercent >= 0 ? "+" : ""}
-                        {dcaReturnPercent.toFixed(2)}%
-                    </>
-                )}
-
-                <br/><br/>
-
-                {(usesWalletAggregation || usesReconstructedDca) && (
-                    <>
-                        <span className="mute">
-                            {usesWalletAggregation
-                                ? "Basis source: wallet-by-wallet active-stake basis, weighted by each selected wallet's live stake principal."
-                                : "Basis source: amount-weighted active-stake ledger, reconciled to the live selected-wallet stake principal."}
-                        </span>
-                    </>
-                )}
-
-                {dcaPurchaseCount > 0 && (
-                    <>
-                        <div
-                            style={{
-                                borderTop:
-                                    "1px solid rgba(255,255,255,0.2)",
-                                margin: "18px 0 12px"
-                            }}
-                        />
-                        <strong>Lifetime Purchase History</strong>
-                        <br/><br/>
-                        <strong>HEX Purchased</strong>
-                        <br/>
-                        {addCommasToNumber(
-                            Number(dcaTotalHex ?? 0).toFixed(0)
-                        )}
-                        <br/><br/>
-                        {dcaPurchaseCount} purchase{
-                            dcaPurchaseCount === 1 ? "" : "s"
-                        }
-                        <br/><br/>
-                        <strong>Network Breakdown</strong>
-
-                        <div style={{ marginTop: 14, color: "#8fbfff" }}>
-                            <strong>Ethereum</strong>
-                            <br/>
-                            Avg: {formatNetworkAverage(ethereumDcaStats)}
-                            <br/>
-                            Spent: $ {formatNetworkSpent(ethereumDcaStats)}
-                            <br/>
-                            {formatNetworkHex(ethereumDcaStats)} HEX
-                            <br/>
-                            {formatNetworkPurchaseCount(ethereumDcaStats)}
-                        </div>
-
-                        <div style={{ marginTop: 14, color: "#c59cff" }}>
-                            <strong>PulseChain</strong>
-                            <br/>
-                            Avg: {formatNetworkAverage(pulsechainDcaStats)}
-                            <br/>
-                            Spent: $ {formatNetworkSpent(pulsechainDcaStats)}
-                            <br/>
-                            {formatNetworkHex(pulsechainDcaStats)} HEX
-                            <br/>
-                            {formatNetworkPurchaseCount(pulsechainDcaStats)}
-                        </div>
-                    </>
-                )}
-                {dcaUnpricedCount > 0 && (
-                    <>
-                        <br/><br/>
-                        {dcaUnpricedCount} purchase{
-                            dcaUnpricedCount === 1
-                                ? ""
-                                : "s"
-                        } could not be historically priced
-                    </>
-                )}
-
-                {!dcaComplete &&
-                    dcaUnpricedCount === 0 && (
-                        <>
-                            <br/><br/>
-                            Some transaction history could
-                            not be retrieved
-                        </>
-                    )}
-
-                {dcaWalletStats.length > 0 && (
-                    <>
-                        <div
-                            style={{
-                                borderTop:
-                                    "1px solid rgba(255,255,255,0.2)",
-                                margin: "16px 0 12px"
-                            }}
-                        />
-
-                        <strong>Wallet Purchase Breakdown</strong>
-
-                        {dcaWalletStats.map(walletStat => {
-                            const walletAveragePrice =
-                                Number(
-                                    walletStat?.averagePrice
-                                )
-
-                            const walletSpent =
-                                Number(
-                                    walletStat?.totalUsdSpent ??
-                                    0
-                                )
-
-                            const walletPricedHex =
-                                Number(
-                                    walletStat
-                                        ?.pricedHexPurchased ??
-                                    0
-                                )
-
-                            const walletCurrentValue =
-                                walletPricedHex *
-                                Number(hexUsd ?? 0)
-
-                            const walletProfit =
-                                walletCurrentValue -
-                                walletSpent
-
-                            const walletReturn =
-                                walletSpent > 0
-                                    ? (
-                                        walletProfit /
-                                        walletSpent
-                                    ) * 100
-                                    : null
-
-                            const normalizedWalletStat =
-                                normalizeWalletAddress(walletStat.wallet)
-
-                            const minerBasisEntry =
-                                selectedWalletMinerBasis.find(item =>
-                                    normalizeWalletAddress(item.wallet) ===
-                                    normalizedWalletStat
-                                )
-
-                            const minerBasisSourceLabel =
-                                minerBasisEntry?.source === "wallet-purchase-dca"
-                                    ? "Purchase DCA"
-                                    : minerBasisEntry?.source === "active-stake-ledger"
-                                        ? "Active-stake ledger"
-                                        : minerBasisEntry?.source === "wallet-liquid-history-estimate"
-                                            ? "Liquid-history estimate"
-                                            : null
-
-                            return (
-                                <div
-                                    key={walletStat.wallet}
-                                    style={{
-                                        marginTop: 14
-                                    }}
-                                >
-                                    <strong>
-                                        {getWalletLabel(
-                                            walletStat.wallet
-                                        )}
-                                    </strong>
-
-                                    {minerBasisSourceLabel && (
-                                        <>
-                                            <br/>
-                                            <span className="mute">
-                                                Miner basis: {minerBasisSourceLabel}
-                                            </span>
-                                        </>
-                                    )}
-
-                                    <br/>
-
-                                    Avg: {
-                                        Number.isFinite(
-                                            walletAveragePrice
-                                        ) &&
-                                        walletAveragePrice > 0
-                                            ? `$ ${walletAveragePrice.toFixed(6)}`
-                                            : "$ N/A"
-                                    }
-
-                                    <br/>
-
-                                    Spent: $ {
-                                        addCommasToNumber(
-                                            walletSpent.toFixed(2)
-                                        )
-                                    }
-
-                                    <br/>
-
-                                    Value: $ {
-                                        addCommasToNumber(
-                                            walletCurrentValue
-                                                .toFixed(2)
-                                        )
-                                    }
-
-                                    {Number.isFinite(
-                                        walletReturn
-                                    ) && (
-                                        <>
-                                            <br/>
-
-                                            Return: {
-                                                walletReturn >= 0
-                                                    ? "+"
-                                                    : ""
-                                            }
-                                            {walletReturn.toFixed(2)}
-                                            %
-
-                                            <br/>
-
-                                            {formatSignedUsd(
-                                                walletProfit
-                                            )}
-                                        </>
-                                    )}
-
-                                    <br/>
-
-                                    {addCommasToNumber(
-                                        Number(
-                                            walletStat
-                                                ?.totalHexPurchased ??
-                                            0
-                                        ).toFixed(0)
-                                    )} HEX
-
-                                    <br/>
-
-                                    {Number(
-                                        walletStat
-                                            ?.purchaseCount ??
-                                        0
-                                    )} purchase{
-                                        Number(
-                                            walletStat
-                                                ?.purchaseCount ??
-                                            0
-                                        ) === 1
-                                            ? ""
-                                            : "s"
-                                    }
-                                </div>
-                            )
-                        })}
-                    </>
-                )}
-            </div>
-        )
-        : (
-            <div style={{ textAlign: "center" }}>
-                {dcaPurchaseCount === 0
-                    ? "No HEX purchases found"
-                    : `${dcaPurchaseCount} HEX purchase${
-                        dcaPurchaseCount === 1
-                            ? ""
-                            : "s"
-                    } found, but historical USD pricing is unavailable`
-                }
-
-                {!dcaComplete && (
-                    <>
-                        <br/><br/>
-                        Some transaction history could not
-                        be retrieved
-                    </>
-                )}
-            </div>
-        )
+        ? <div style={{ textAlign: "center" }}>
+            Checking for new HEX purchases since the saved scan checkpoint
+            {dcaProgress?.diagnostic ? <><br/><span style={{ opacity: .75, fontSize: 11 }}>{dcaProgress.diagnostic}</span></> : null}
+          </div>
+        : hasDcaPrice
+            ? <div style={{ textAlign: "center" }}>
+                <strong>Lifetime HEX DCA</strong><br/>
+                $ {Number(dcaPrice ?? 0).toFixed(6)}
+                {chainBreakdown("Ethereum", visibleChainStats.ethereum, "#8fbfff")}
+                {chainBreakdown("PulseChain", visibleChainStats.pulsechain, "#c59cff")}
+                <br/>Open <strong>Details</strong> for the purchase timeline.
+              </div>
+            : <div style={{ textAlign: "center" }}>HEX DCA unavailable</div>
     
     return <Wrapper>
         <div style={disabled ? { color: 'rgb(120,120,120)', opacity: 0.5 } : {}}>
@@ -1000,13 +881,13 @@ const fitPnlFontSize = value => {
                         <div
                             style={{
                                 marginTop: 1,
-                                fontSize: dcaLoading ? 21 : 25,
+                                fontSize: dcaLoading && dcaProgress?.showPhases ? 21 : 25,
                                 lineHeight: 1
                             }}
                         >
                             {dcaDisplay}
 
-                            {dcaLoading && dcaProgressText && (
+                            {dcaLoading && dcaProgress?.showPhases && dcaProgressText && (
                                 <div
                                     style={{
                                         marginTop: 3,
@@ -1059,6 +940,36 @@ const fitPnlFontSize = value => {
                     </Row>
                 </Tooltip>
             </div>
+            <div className="hex-detail-actions" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 8, marginTop: 0, alignItems: 'start' }}>
+                <div style={{ gridColumn: '1 / 2', justifySelf: 'start' }}>
+                    <Button
+                        text="Details"
+                        textAlign="center"
+                        onClick={onToggleMinerDetails}
+                        disabled={disabled || typeof onToggleMinerDetails !== 'function'}
+                        parentStyle={{ width: 75, height: 30 }}
+                        style={{ padding: "4px 8px", fontSize: 12 }}
+                    />
+                </div>
+                <div style={{ gridColumn: '5 / 6', justifySelf: 'start' }}>
+                    <Button
+                        text="Details"
+                        textAlign="center"
+                        onClick={() => setShowDcaDetails(value => !value)}
+                        disabled={!(hexDcaData?.purchases?.length > 0)}
+                        parentStyle={{ width: 66, height: 30 }}
+                        style={{ padding: "4px 8px", fontSize: 11 }}
+                    />
+                </div>
+            </div>
+            {showDcaDetails && (
+                <HexPurchaseTimeline
+                    purchases={hexDcaData?.purchases ?? []}
+                    hiddenWallets={hiddenWallets}
+                    visibleWallets={visibleWallets}
+                    summary={{ totalHex: dcaTotalHex, totalSpent: directDcaBasis, purchaseCount: dcaPurchaseCount, currentPrice: hexUsd }}
+                />
+            )}
         </div>
     </Wrapper>
 }

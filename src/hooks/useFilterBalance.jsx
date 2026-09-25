@@ -82,6 +82,11 @@ export default function useFilterBalance({ balanceData, farmData, lpData, hidden
                     acc[lpAddress].token1.normalized = Number(acc[lpAddress].token1.normalized || 0) + Number(farm.token1.normalized || 0)
                     acc[lpAddress].token1.raw = (BigInt(acc[lpAddress].token1.raw || 0) + BigInt(farm.token1.raw || 0)).toString()
 
+                    // Add the estimated live INC emission rate for all visible wallets.
+                    // Without this aggregation, filtering/hiding wallets kept the LP values
+                    // but dropped incPerDay, causing the farm summary to show 0.00 INC/day.
+                    acc[lpAddress].incPerDay = Number(acc[lpAddress].incPerDay || 0) + Number(farm.incPerDay || 0)
+
                     // Add rewards values
                     acc[lpAddress].rewards.usd = Number(acc[lpAddress].rewards.usd || 0) + Number(farm.rewards.usd || 0)
                     acc[lpAddress].rewards.normalized = Number(acc[lpAddress].rewards.normalized || 0) + Number(farm.rewards.normalized || 0)

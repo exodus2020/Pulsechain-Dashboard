@@ -100,7 +100,6 @@ function SettingsModal({ context }) {
   
   const [ externalImages, setAllowExternalImages] = useState(settings?.config?.tokenImagesEnabled ?? false)
   const [ externalDappImages, setAllowExternalDappImages] = useState(settings?.config?.dappImagesEnabled ?? false)
-  const [ allowPulsechainApi, setAllowPulseChainApi] = useState(settings?.config?.scanEnabled ?? false)
   const [ rpcUrl, setRpcUrl ] = useState('')
   const { isValid, isChecking, error, validateRpc } = useValidateRpc()
 
@@ -110,7 +109,8 @@ function SettingsModal({ context }) {
       config: {
         ...settings.config,
         tokenImagesEnabled: externalImages,
-        scanEnabled: allowPulsechainApi,
+        // PulseChain Explorer access is required by dashboard features and is always enabled.
+        scanEnabled: true,
         dappImagesEnabled: externalDappImages
       },
     }
@@ -121,7 +121,6 @@ function SettingsModal({ context }) {
 
   useEffect(() => {
     setAllowExternalImages(settings?.config?.tokenImagesEnabled ?? false)
-    setAllowPulseChainApi(settings?.config?.scanEnabled ?? false)
     setAllowExternalDappImages(settings?.config?.dappImagesEnabled ?? false)
   }, [settings])
 
@@ -252,7 +251,6 @@ function SettingsModal({ context }) {
                   </Button>
                 </div>
                 <Checkbox value={externalDappImages} onChange={setAllowExternalDappImages} label="Allow Use of External Community dApp Icons" />
-                <Checkbox value={allowPulsechainApi} onChange={setAllowPulseChainApi} label={<div>Allow Use of <span className='ht'>Pulsechain Explorer</span> API</div>} />
                 <Input 
                   placeholder={settings?.rpcs?.mainnet?.[0] ?? ''} 
                   buttonText={isChecking ? 'Validating...' : 'Update RPC'} 

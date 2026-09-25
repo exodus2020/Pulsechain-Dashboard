@@ -306,49 +306,87 @@ ipcMain.handle('fetch-json', async (event, url) => {
     }
   }
 })
+// V2.4.2: deduplicate identical remote metadata requests and keep a short-lived
+// cache. Several renderer paths can ask for the same PulseCoinList/resource URL
+// at startup; firing all of them independently was causing bursts of HTTP 429s.
+const getFileCache = new Map()
+const getFileInflight = new Map()
+const GET_FILE_CACHE_MS = 60 * 1000
+const GET_FILE_429_BACKOFF_MS = 2 * 60 * 1000
+
 ipcMain.handle('getFile', async (event, url) => {
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://pulsecoinlist.com/',
-        'Origin': 'https://pulsecoinlist.com'
-      }
-    })
+  const key = String(url ?? '')
+  const now = Date.now()
+  const cached = getFileCache.get(key)
 
-    const contentType = response.headers.get('content-type') || ''
-    const text = await response.text()
-
-    if (!response.ok) {
-      throw new Error(`Network response was not ok: ${response.status}`)
-    }
-
-    try {
-    return JSON.parse(text)
-  } catch (parseError) {
-    try {
-      const nextDataMatch = text.match(
-        /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/
-      )
-
-      if (nextDataMatch?.[1]) {
-        return JSON.parse(nextDataMatch[1])
-      }
-
-      console.warn('Failed to parse response as JSON or __NEXT_DATA__:', parseError)
-      return null
-    } catch (htmlParseError) {
-      console.warn('Failed to extract __NEXT_DATA__ from HTML:', htmlParseError)
-      return null
-    }
+  if (cached?.value != null && now - cached.savedAt < GET_FILE_CACHE_MS) {
+    return cached.value
   }
 
-  } catch (error) {
-    console.warn('Error fetching file:', error)
-    return null
+  if (cached?.retryAfter && now < cached.retryAfter) {
+    return cached.value ?? null
   }
+
+  if (getFileInflight.has(key)) {
+    return getFileInflight.get(key)
+  }
+
+  const request = (async () => {
+    try {
+      const response = await fetch(key, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://pulsecoinlist.com/',
+          'Origin': 'https://pulsecoinlist.com'
+        }
+      })
+
+      const text = await response.text()
+
+      if (!response.ok) {
+        if (response.status === 429) {
+          const retryAfterSeconds = Number(response.headers.get('retry-after'))
+          const retryAfter = now + (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+            ? retryAfterSeconds * 1000
+            : GET_FILE_429_BACKOFF_MS)
+          getFileCache.set(key, { value: cached?.value ?? null, savedAt: cached?.savedAt ?? 0, retryAfter })
+          console.warn(`[getFile] rate limited (429), backing off: ${key}`)
+          return cached?.value ?? null
+        }
+        console.warn(`[getFile] HTTP ${response.status}: ${key}`)
+        return cached?.value ?? null
+      }
+
+      let value = null
+      try {
+        value = JSON.parse(text)
+      } catch (parseError) {
+        try {
+          const nextDataMatch = text.match(
+            /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/
+          )
+          if (nextDataMatch?.[1]) value = JSON.parse(nextDataMatch[1])
+        } catch (htmlParseError) {
+          console.warn('Failed to extract __NEXT_DATA__ from HTML:', htmlParseError)
+        }
+      }
+
+      if (value != null) {
+        getFileCache.set(key, { value, savedAt: Date.now(), retryAfter: 0 })
+      }
+      return value
+    } catch (error) {
+      console.warn('[getFile] request failed:', error?.message ?? error)
+      return cached?.value ?? null
+    } finally {
+      getFileInflight.delete(key)
+    }
+  })()
+
+  getFileInflight.set(key, request)
+  return request
 })
 
 ipcMain.handle('open-external', async (event, url) => {

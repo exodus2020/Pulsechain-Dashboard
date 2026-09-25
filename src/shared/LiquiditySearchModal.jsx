@@ -97,30 +97,16 @@ function LiquiditySearchModal() {
   const { searchTerm: prefilledTerm } = modal
 
   const [ searchTerm, setSearchTerm ] = useState(prefilledTerm ?? '')
-  const [ settings ] = useAtom(appSettingsAtom)
   const [ scanned, setScanned ] = useState(false)
-  const [ showScanPrompt, setShowScanPrompt ] = useState(false)
-  const [ allowOneTimeScan, setAllowOneTimeScan ] = useState(false)
 
   const { toggleLPWatchlist, getImage, data: context, massToggleLPWatchlist } = useAppContext()
   const lps = [...Object.keys(context?.lpWatchlist ?? {}), ...Object.keys(liquidityPairs ?? {})]
   const { isLoading, isError, data, noResults, scanForTokens } = useLiquiditySearch({ searchTerm, wallets: Object.keys(context?.wallets ?? {}), lpAddresses: lps ?? [] })
 
 
-  const handleScanApproval = () => {
-    setAllowOneTimeScan(true)
-    setShowScanPrompt(false)
-  }
-
   const handleScan = async () => {
     if (scanned) return
     
-    // If scan not enabled and not yet allowed one-time, show prompt
-    if (!settings?.config?.scanEnabled && !allowOneTimeScan) {
-      setShowScanPrompt(true)
-      return
-    }
-
     setScanned(true)
     try {
       await scanForTokens()
@@ -148,61 +134,7 @@ function LiquiditySearchModal() {
     setSearchTerm(inputValue)
   }
 
-  useEffect(() => {
-    if (allowOneTimeScan && !showScanPrompt && !scanned) {
-      handleScan()
-    }
-  }, [allowOneTimeScan, showScanPrompt])
-
   const validLPs = (data ?? []).filter(lp => lp?.token0?.id && lp?.token1?.id && lp?.token0?.name !== 'PulseX LP' && lp?.token1?.name !== 'PulseX LP')
-
-  // Show scan prompt modal if needed
-  if (showScanPrompt) {
-    return <ModalWrapper>
-      <ModalContent>
-        <div style={{ overflowY: 'auto' }}>
-          <div className="modal-header">
-            <Icon icon={icons_list.coin} size={24}/> PulseX Liquidity (PLP) Watchlist
-            <button className="close-button" onClick={() => setModal(false)}>
-              X
-            </button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '20px 10px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr .2fr', gap: '10px' }}>
-              <Input 
-                defaultInput={searchTerm} 
-                onSubmit={handleSubmit} 
-                placeholder="Enter PLP token address" 
-                disabled={isLoading} 
-                buttonText={isLoading ? 'Searching...' : 'Search'}
-              />
-              <Button textAlign='center'
-                style={{ background: 'rgb(40,40,40)', color: 'rgb(100,100,100)' }}
-              >
-                Scan
-              </Button>
-            </div>
-            <div style={{ textAlign: 'center', fontSize: 14 }}>
-              Scan utilizes the PulseChain Explorer Scan API.<br/><br/>
-              Would you like to temporarily enable this feature and scan?
-              <br/><br/>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', textAlign: 'center' }}>
-                <Button 
-                  style={{ width: '200px'}} 
-                  textAlign='center' 
-                  parentStyle={{ width: '200px' }}
-                  onClick={handleScanApproval}
-                >
-                  Scan for PLP Tokens
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </ModalContent>
-      <ModelOverLay onClick={() => setModal(false)}/>
-    </ModalWrapper>
-  }
 
   return (
     <ModalWrapper>

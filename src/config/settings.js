@@ -31,8 +31,8 @@ export const defaultSettings = {
     },
 
     config: {
-        scanEnabled: false,
-        tokenImagesEnabled: false,
+        scanEnabled: true,
+        tokenImagesEnabled: true,
         dappImagesEnabled: false
     }
 }
@@ -45,30 +45,35 @@ export const migrateSettings = (settings) => {
     ]
 
     const savedMainnetRpcs = settings?.rpcs?.mainnet ?? []
-
     const hasObsoleteRpc = savedMainnetRpcs.some(
         rpc => obsoleteMainnetRpcs.includes(rpc)
     )
 
-    // If the user doesn't have an obsolete RPC, leave their setup alone.
-    if (!hasObsoleteRpc) {
-        return settings
-    }
+    const migrated = hasObsoleteRpc
+        ? {
+            ...settings,
+            rpcs: {
+                ...settings.rpcs,
+                mainnet: [
+                    ...defaultSettings.rpcs.mainnet,
+                    ...savedMainnetRpcs.filter(
+                        rpc =>
+                            !obsoleteMainnetRpcs.includes(rpc) &&
+                            !defaultSettings.rpcs.mainnet.includes(rpc)
+                    )
+                ]
+            }
+        }
+        : settings
 
-    const customMainnetRpcs = savedMainnetRpcs.filter(
-        rpc =>
-            !obsoleteMainnetRpcs.includes(rpc) &&
-            !defaultSettings.rpcs.mainnet.includes(rpc)
-    )
-
+    // Explorer access is a required dashboard service, not a user preference.
+    // Force it on for existing/imported configs that may still contain scanEnabled: false.
     return {
-        ...settings,
-        rpcs: {
-            ...settings.rpcs,
-            mainnet: [
-                ...defaultSettings.rpcs.mainnet,
-                ...customMainnetRpcs
-            ]
+        ...migrated,
+        config: {
+            ...defaultSettings.config,
+            ...(migrated.config ?? {}),
+            scanEnabled: true
         }
     }
 }

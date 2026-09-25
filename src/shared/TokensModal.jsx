@@ -86,7 +86,6 @@ const ModalContent = styled.div`
 function TokensModal({ wplsPrice }) {
   const [ modal, setModal ] = useAtom(tokensModalAtom)
   const { searchTerm: prefilledTerm } = modal
-  const [ settings ] = useAtom(appSettingsAtom)
 
   const [ searchTerm, setSearchTerm ] = useState('')
 
@@ -97,8 +96,6 @@ function TokensModal({ wplsPrice }) {
 
   const {isLoading, isError, data, noResults, scanForTokens } = useTokenSearch({ searchTerm, wallets: Object.keys(context?.data?.wallets ?? {}), watchlistAddresses, wplsPrice})
   const [ scanned, setScanned ] = useState(false)
-  const [ showScanPrompt, setShowScanPrompt ] = useState(false)
-  const [ allowOneTimeScan, setAllowOneTimeScan ] = useState(false)
 
   const [ results, setResults ] = useState([])
   const [ selectedTokens, setSelectedTokens ] = useState([])
@@ -347,20 +344,9 @@ function TokensModal({ wplsPrice }) {
     </div>
   }
 
-  const handleScanApproval = () => {
-    setAllowOneTimeScan(true)
-    setShowScanPrompt(false)
-  }
-
   const handleScan = async () => {
     if (scanned) return
     
-    // If scan not enabled and not yet allowed one-time, show prompt
-    if (!settings?.config?.scanEnabled && !allowOneTimeScan) {
-      setShowScanPrompt(true)
-      return
-    }
-
     setScanned(true)
     try {
       await scanForTokens()
@@ -368,12 +354,6 @@ function TokensModal({ wplsPrice }) {
       console.log('Unable to scan for tokens')
     }
   }
-
-  useEffect(() => {
-    if (allowOneTimeScan && !showScanPrompt && !scanned) {
-      handleScan()
-    }
-  }, [allowOneTimeScan, showScanPrompt])
 
   const handleToggleTokens = () => {
     selectedTokens.forEach(token => {
@@ -393,49 +373,6 @@ function TokensModal({ wplsPrice }) {
 
     setModal(false)
 }
-
-  if (showScanPrompt) {
-    return (
-      <ModalWrapper>
-        <ModalContent>
-          <div style={{ overflowY: 'auto' }}>
-            <div className="modal-header">
-                <Icon icon={icons_list.coin} size={24}/> Token Watchlist
-                <button className="close-button" onClick={() => setModal(false)}>
-                  X
-                </button>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '20px 10px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr .2fr', gap: '10px' }}>
-                <Input defaultInput={prefilledTerm ?? searchTerm} onSubmit={handleSubmit} placeholder={"Search for a token symbol or address"} disabled={false} containerStyle={{ gridTemplateColumns: '1fr 100px'}}/>
-                <Button onClick={handleScan} textAlign='center'
-                    style={scanned ? { background: 'rgb(40,40,40)', color: 'rgb(100,100,100)' } : {}}
-                >
-                  Scan
-                </Button>
-              </div>
-              <div style={{ textAlign: 'center', fontSize: 14 }}>
-                Scan utilizes the PulseChain Explorer Scan API.<br/><br/>
-                Would you like to temporarily enable this feature and scan?
-                <br/><br/>
-                <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', textAlign: 'center' }}>
-                  <Button 
-                    style={{ width: '200px'}} 
-                    textAlign='center' 
-                    parentStyle={{ width: '200px' }}
-                    onClick={handleScanApproval}
-                  >
-                    Scan for Tokens
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </ModalContent>
-        <ModelOverLay onClick={() => setModal(false)}/>
-      </ModalWrapper>
-    )
-  }
 
   return (
     <ModalWrapper>

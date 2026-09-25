@@ -499,7 +499,7 @@ export const fetchIncomingTokenTransferTransactions = async (
     settings = defaultSettings,
     options = {}
 ) => {
-    const { maxPages = 100, delayBetweenPages = 350, retryAttempts = 6, onProgress = null } = options
+    const { maxPages = 100, delayBetweenPages = 350, retryAttempts = 6, onProgress = null, startBlock = 0, endBlock = Number.MAX_SAFE_INTEGER } = options
     const wallet = String(address ?? "").toLowerCase().trim()
     const token = String(tokenAddress ?? "").toLowerCase().trim()
     if (!isValidWalletAddress(wallet) || !isValidWalletAddress(token)) return []
@@ -550,6 +550,9 @@ export const fetchIncomingTokenTransferTransactions = async (
             // ERC-20 transaction hash is cheap to preserve here; the existing receipt
             // decoder remains the authority that decides whether the transaction
             // actually contains incoming HEX and qualifies as a purchase.
+            const itemBlock = Number(item?.block_number ?? item?.block ?? 0)
+            if (Number.isFinite(itemBlock) && itemBlock > 0 && itemBlock < Number(startBlock ?? 0)) continue
+            if (Number.isFinite(itemBlock) && itemBlock > Number(endBlock ?? Number.MAX_SAFE_INTEGER)) continue
             if (!hash || to !== wallet || seenHashes.has(hash)) continue
             // v106: strict HEX filtering on both networks.
             if (itemToken !== token) continue
@@ -569,7 +572,9 @@ export const fetchIncomingTokenTransferTransactions = async (
         }
         page += 1
         if (typeof onProgress === "function") onProgress({ address: wallet, page, collected: rows.length, scanned: scannedTransfers, network })
-        cursor = data?.next_page_params ?? null
+        const pageBlocks = items.map(item => Number(item?.block_number ?? item?.block ?? 0)).filter(Number.isFinite)
+        const reachedCheckpoint = Number(startBlock ?? 0) > 0 && pageBlocks.length > 0 && Math.max(...pageBlocks) < Number(startBlock)
+        cursor = reachedCheckpoint ? null : (data?.next_page_params ?? null)
         if (cursor) {
             const key = JSON.stringify(cursor)
             if (seenCursors.has(key)) throw new Error(`Explorer repeated token-transfer cursor for ${wallet}`)

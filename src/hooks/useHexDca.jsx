@@ -189,10 +189,9 @@ const safeLocalStorageSet = (key, value) => {
         // DCA still works without persistent caching.
     }
 }
-const DCA_RESULT_CACHE_VERSION = 8
-const DCA_RESULT_CACHE_MAX_AGE = 6 * 60 * 60 * 1000
+const DCA_RESULT_CACHE_VERSION = 9 // v157: do not migrate pre-hourly combined DCA pricing into the new wallet cache
 
-const DCA_WALLET_CACHE_VERSION = 9 // v123: preserve v122 wallet cache; refresh policy no longer discards a usable saved DCA
+const DCA_WALLET_CACHE_VERSION = 10 // v157: rebuild once so historical purchase basis uses hourly pricing
 const getDcaWalletCacheKey = wallet => `hex_dca_wallet_v${DCA_WALLET_CACHE_VERSION}:${normalizeAddress(wallet)}`
 const readDcaWalletCache = wallet => {
     try {
@@ -202,12 +201,12 @@ const readDcaWalletCache = wallet => {
         return Array.isArray(parsed?.purchases) ? parsed : null
     } catch { return null }
 }
-const writeDcaWalletCache = (wallet, purchases, walletErrors = {}, transactionErrors = [], complete = true) => {
+const writeDcaWalletCache = (wallet, purchases, walletErrors = {}, transactionErrors = [], complete = true, scanCheckpoints = {}) => {
     // V45: only a fully successful wallet scan is allowed to become a warm
     // six-hour DCA cache. A transient explorer/RPC/pricing failure used to be
     // persisted exactly like a successful zero-purchase wallet, which could
     // make a packaged restart show DCA/P&L as N/A until the cache expired.
-    const payload = { purchases, walletErrors, transactionErrors, complete: complete === true, cachedAt: Date.now() }
+    const payload = { purchases, walletErrors, transactionErrors, complete: complete === true, scanCheckpoints, cachedAt: Date.now() }
     safeLocalStorageSet(getDcaWalletCacheKey(wallet), JSON.stringify(payload))
     return payload
 }
@@ -320,6 +319,14 @@ const toUnixSeconds = timestamp => {
     return Number.isFinite(parsedMilliseconds)
         ? Math.floor(parsedMilliseconds / 1000)
         : null
+}
+
+// v157: DCA pricing is intentionally bucketed to the nearest whole UTC hour.
+// This is materially more precise than daily closes while still allowing every
+// purchase in the same token/hour bucket to share one cached historical quote.
+const toNearestUtcHour = timestamp => {
+    const unixTimestamp = toUnixSeconds(timestamp)
+    return unixTimestamp ? Math.round(unixTimestamp / 3600) * 3600 : null
 }
 
 
@@ -538,98 +545,39 @@ const selectClosestCandlePrice = (
 }
 
 const fetchHistoricalEthPrice = async timestamp => {
-    const unixTimestamp = toUnixSeconds(timestamp)
+    const roundedTimestamp = toNearestUtcHour(timestamp)
+    if (!roundedTimestamp) return null
 
-    if (!unixTimestamp) {
-        return null
-    }
-
-    const date = new Date(unixTimestamp * 1000)
-
-    const year = date.getUTCFullYear()
-    const month = String(
-        date.getUTCMonth() + 1
-    ).padStart(2, "0")
-    const day = String(
-        date.getUTCDate()
-    ).padStart(2, "0")
-
-    const cacheKey = `eth:${year}-${month}-${day}`
-
-    if (priceMemoryCache.has(cacheKey)) {
-        return priceMemoryCache.get(cacheKey)
-    }
+    const cacheKey = `eth:hour:${roundedTimestamp}`
+    if (priceMemoryCache.has(cacheKey)) return priceMemoryCache.get(cacheKey)
 
     const storageKey = `hex_dca_price_${cacheKey}`
-    const storedPrice = Number(
-        safeLocalStorageGet(storageKey)
-    )
-
-    if (
-        Number.isFinite(storedPrice) &&
-        storedPrice > 0
-    ) {
+    const storedPrice = Number(safeLocalStorageGet(storageKey))
+    if (Number.isFinite(storedPrice) && storedPrice > 0) {
         priceMemoryCache.set(cacheKey, storedPrice)
         return storedPrice
     }
 
-    const startOfDay = Date.UTC(
-        year,
-        date.getUTCMonth(),
-        date.getUTCDate()
-    )
-
-    const endOfDay =
-        startOfDay + 86400000 - 1
-
+    const startTime = roundedTimestamp * 1000
+    const endTime = startTime + 3600000 - 1
     const url =
         `https://data-api.binance.vision/api/v3/klines` +
-        `?symbol=ETHUSDT` +
-        `&interval=1d` +
-        `&startTime=${startOfDay}` +
-        `&endTime=${endOfDay}` +
-        `&limit=1`
+        `?symbol=ETHUSDT&interval=1h` +
+        `&startTime=${startTime}&endTime=${endTime}&limit=1`
 
     try {
-        const json = await fetchJsonWithRetry(url, {
-            attempts: 3,
-            delay: 1000
-        })
-
-        const candle =
-            Array.isArray(json) && Array.isArray(json[0])
-                ? json[0]
-                : null
-
-        // Binance kline layout:
-        // 0 open time, 1 open, 2 high, 3 low, 4 close.
-        const price = Number(candle?.[4])
-
-        if (
-            !Number.isFinite(price) ||
-            price <= 0
-        ) {
-            return null
-        }
-
+        const json = await fetchJsonWithRetry(url, { attempts: 3, delay: 1000 })
+        const candle = Array.isArray(json) && Array.isArray(json[0]) ? json[0] : null
+        // Use the hourly OPEN: it is the market price at the rounded whole hour.
+        const price = Number(candle?.[1])
+        if (!Number.isFinite(price) || price <= 0) return null
         priceMemoryCache.set(cacheKey, price)
-        safeLocalStorageSet(
-            storageKey,
-            String(price)
-        )
-
+        safeLocalStorageSet(storageKey, String(price))
         return price
     } catch (error) {
-        console.error(
-            "ETH PRICE FALLBACK FAILED:",
-            {
-                timestamp,
-                url,
-                status: error?.status,
-                message: error?.message
-            }
-        )
-
+        console.error("ETH HOURLY PRICE FALLBACK FAILED:", {
+            timestamp, roundedTimestamp, url, status: error?.status, message: error?.message
+        })
         return null
     }
 }
@@ -642,13 +590,12 @@ const fetchHistoricalLlamaPrice = async (
     source = getDcaSource("mainnet")
 ) => {
     const normalizedToken = normalizeAddress(tokenAddress)
-    const unixTimestamp = toUnixSeconds(timestamp)
-    if (!normalizedToken || !unixTimestamp) return null
+    const roundedTimestamp = toNearestUtcHour(timestamp)
+    if (!normalizedToken || !roundedTimestamp) return null
 
     const llamaChain = source?.key === "ethereum" ? "ethereum" : "pulsechain"
     const coinKey = `${llamaChain}:${normalizedToken}`
-    const dayBucket = Math.floor(unixTimestamp / 86400)
-    const cacheKey = `llama:${coinKey}:${dayBucket}`
+    const cacheKey = `llama:hour:${coinKey}:${roundedTimestamp}`
 
     if (priceMemoryCache.has(cacheKey)) {
         return priceMemoryCache.get(cacheKey)
@@ -663,7 +610,7 @@ const fetchHistoricalLlamaPrice = async (
 
     try {
         const url =
-            `https://coins.llama.fi/prices/historical/${unixTimestamp}/` +
+            `https://coins.llama.fi/prices/historical/${roundedTimestamp}/` +
             encodeURIComponent(coinKey)
         const result = await window.electron.fetchJson(url)
         if (!result?.ok) return null
@@ -688,8 +635,9 @@ const fetchHistoricalTokenPrice = async (
 ) => {
     const normalizedToken = normalizeAddress(tokenAddress)
     const unixTimestamp = toUnixSeconds(timestamp)
+    const roundedTimestamp = toNearestUtcHour(timestamp)
 
-    if (!normalizedToken || !unixTimestamp) {
+    if (!normalizedToken || !unixTimestamp || !roundedTimestamp) {
         return null
     }
 
@@ -729,11 +677,10 @@ if (Number.isFinite(llamaPrice) && llamaPrice > 0) {
     return llamaPrice
 }
 
-    // Cache one historical price per token per UTC day.
-    // Many HEX purchases are separate multicalls made minutes apart, so this
-    // prevents repeatedly requesting nearly identical historical prices.
-    const dayBucket =
-        Math.floor(unixTimestamp / 86400)
+    // Cache one historical price per token per nearest UTC hour.
+    // This keeps pricing accurate to the hour without repeating requests for
+    // multicalls or purchases that share the same hourly market bucket.
+    const hourBucket = Math.floor(roundedTimestamp / 3600)
 
     const networkKey =
         source?.key ??
@@ -741,7 +688,7 @@ if (Number.isFinite(llamaPrice) && llamaPrice > 0) {
         "pulsechain"
 
     const cacheKey =
-        `${networkKey}:${normalizedToken}:${dayBucket}`
+        `${networkKey}:${normalizedToken}:hour:${hourBucket}`
 
     if (priceMemoryCache.has(cacheKey)) {
         return priceMemoryCache.get(cacheKey)
@@ -766,7 +713,8 @@ if (Number.isFinite(llamaPrice) && llamaPrice > 0) {
 
     const fetchCandles = async timeframe => {
         const intervalSeconds = timeframe === "hour" ? 3600 : 86400
-        const beforeTimestamp = unixTimestamp + intervalSeconds
+        const targetTimestamp = timeframe === "hour" ? roundedTimestamp : unixTimestamp
+        const beforeTimestamp = targetTimestamp + intervalSeconds
         const geckoNetwork =
             source?.geckoNetwork ?? "pulsechain"
 
@@ -784,31 +732,24 @@ if (Number.isFinite(llamaPrice) && llamaPrice > 0) {
 
     let price = null
 
-    // Daily pricing is accurate enough for a cost-basis estimate and allows
-    // every purchase of the same token on the same day to share one cached price.
-    try {
-
-    const dailyCandles = await fetchCandles("day")
-
-    price = selectClosestCandlePrice(
-        dailyCandles,
-        unixTimestamp
-    )
-
-} catch (dailyError) {
-    // Fall through to hourly pricing. Keep the error in case the fallback also fails.
+    // v157: hourly first. Daily is only a last-resort fallback when the provider
+    // has no hourly candle for this older/long-tail asset.
     try {
         const hourlyCandles = await fetchCandles("hour")
-        price = selectClosestCandlePrice(hourlyCandles, unixTimestamp)
+        price = selectClosestCandlePrice(hourlyCandles, roundedTimestamp)
     } catch (hourlyError) {
-        throw hourlyError ?? dailyError
+        try {
+            const dailyCandles = await fetchCandles("day")
+            price = selectClosestCandlePrice(dailyCandles, unixTimestamp)
+        } catch (dailyError) {
+            throw dailyError ?? hourlyError
+        }
     }
-}
 
-if (!price) {
-    const hourlyCandles = await fetchCandles("hour")
-    price = selectClosestCandlePrice(hourlyCandles, unixTimestamp)
-}
+    if (!price) {
+        const dailyCandles = await fetchCandles("day")
+        price = selectClosestCandlePrice(dailyCandles, unixTimestamp)
+    }
 
     if (!Number.isFinite(price) || price <= 0) {
         return null
@@ -1453,7 +1394,8 @@ export default function useHexDca({
     const [progress, setProgress] = useState({
         current: 0,
         total: 0,
-        stage: "idle"
+        stage: "idle",
+        showPhases: false
     })
 
     const walletAddresses = useMemo(() => {
@@ -1507,7 +1449,7 @@ const resultCacheKey =
 // stats filtering, so adding or hiding an unrelated wallet never invalidates
 // another wallet's HEX purchase history.
 const cachedWallets = {}
-const staleWallets = []
+const staleWallets = [...walletAddresses]
 
 // Migrate the existing V6 combined cache into wallet-sized pieces once. This
 // preserves the expensive scan users already completed before V33.
@@ -1528,14 +1470,16 @@ if (legacyCombinedCache) {
 
 for (const wallet of walletAddresses) {
     const cached = readDcaWalletCache(wallet)
-    const age = cached?.cachedAt ? Date.now() - cached.cachedAt : Infinity
-    if (cached) cachedWallets[wallet] = cached
-    // v123: a saved DCA is a usable snapshot even when a few historical prices
-    // failed or the diagnostic scan was partial. Do NOT throw it away and launch
-    // another multi-minute history crawl on Ctrl+R. Keep showing the saved result
-    // until the normal cache age expires (or the user explicitly clears cache).
-    if (!cached || age >= DCA_RESULT_CACHE_MAX_AGE) staleWallets.push(wallet)
+    // Always key the in-memory cache by normalized address. Incremental scan
+    // lookups also use normalized addresses; mixing checksum/original keys here
+    // caused valid checkpoints to be missed and restarted lifetime history scans.
+    if (cached) cachedWallets[normalizeAddress(wallet)] = cached
 }
+
+// v157: distinguish a genuinely new/uncached wallet from the cheap forward
+// checkpoint refresh performed for wallets that already have a completed DCA.
+const uncachedWallets = walletAddresses.filter(wallet => !cachedWallets[normalizeAddress(wallet)])
+const showFullScanPhases = uncachedWallets.length > 0
 
 const warmPurchases = Object.values(cachedWallets).flatMap(item => item?.purchases ?? [])
 const warmWalletErrors = Object.values(cachedWallets).reduce((acc, item) => ({ ...acc, ...(item?.walletErrors ?? {}) }), {})
@@ -1549,139 +1493,96 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
     setLoading(false)
 }
 
-if (staleWallets.length === 0) {
-    // v135: A warm wallet cache should not freeze historical-pricing failures
-    // for six hours. Reprice only the failed rows in-place; do NOT rescan chain
-    // history and do NOT require the user to clear cache.
-    let cachedUnpriced = warmPurchases.filter(p => p?.pricingError)
-    if (cachedUnpriced.length === 0) return
-
-    // v140: Repair already-saved caches without forcing a chain-history rescan.
-    // Only unresolved rows are inspected. If the sole outgoing token is an LP
-    // token transferred back to its own pair contract, the incoming HEX is
-    // liquidity being redeemed, not HEX being purchased. Remove that row from
-    // the purchase ledger and persist the corrected wallet cache.
-    const cachedLiquidityRedemptionKeys = new Set()
-    for (const candidate of cachedUnpriced) {
-        try {
-            if (Number(candidate?.nativePlsSpent ?? 0) > 0) continue
-            const payments = Array.isArray(candidate?.payments) ? candidate.payments : []
-            if (payments.length !== 1 || !payments[0]?.tokenAddress) continue
-
-            const network = candidate?.network ?? "mainnet"
-            const tokenAddress = normalizeAddress(payments[0].tokenAddress)
-            const wallet = normalizeAddress(candidate?.wallet)
-            const txHash = candidate?.hash ?? candidate?.transactionHash
-            const metadata = await batchFetchTokenInfo([tokenAddress], network, settings)
-            const info = metadata?.[tokenAddress] ?? {}
-            const symbol = String(info?.symbol ?? payments[0]?.symbol ?? "").toUpperCase()
-            const name = String(info?.name ?? payments[0]?.name ?? "").toLowerCase()
-            const looksLikeLpToken =
-                symbol === "PLP" ||
-                symbol.includes("LP") ||
-                name.includes("lp") ||
-                name.includes("liquidity")
-            if (!looksLikeLpToken) continue
-
-            const transfers = await decodeTransferLogs(txHash, network, settings)
-            const matchingOutgoing = (Array.isArray(transfers) ? transfers : []).filter(transfer =>
-                normalizeAddress(transfer?.from) === wallet &&
-                normalizeAddress(transfer?.tokenAddress) === tokenAddress
-            )
-            const sentBackToPair = matchingOutgoing.length > 0 && matchingOutgoing.every(transfer =>
-                normalizeAddress(transfer?.to) === tokenAddress
-            )
-            if (!sentBackToPair) continue
-
-            const key = `${wallet}:${String(txHash ?? "").toLowerCase()}`
-            cachedLiquidityRedemptionKeys.add(key)
-        } catch (error) {
-        }
-    }
-
-    let v140WarmPurchases = warmPurchases
-    if (cachedLiquidityRedemptionKeys.size > 0) {
-        v140WarmPurchases = warmPurchases.filter(p => {
-            const key = `${normalizeAddress(p?.wallet)}:${String(p?.hash ?? p?.transactionHash ?? "").toLowerCase()}`
-            return !cachedLiquidityRedemptionKeys.has(key)
-        })
-        cachedUnpriced = v140WarmPurchases.filter(p => p?.pricingError)
-
-        for (const wallet of walletAddresses) {
-            const oldCache = cachedWallets[wallet]
-            if (!oldCache) continue
-            const walletPurchases = v140WarmPurchases.filter(
-                p => normalizeAddress(p?.wallet) === normalizeAddress(wallet)
-            )
-            cachedWallets[wallet] = writeDcaWalletCache(
-                wallet,
-                walletPurchases,
-                oldCache?.walletErrors ?? {},
-                oldCache?.transactionErrors ?? [],
-                oldCache?.complete === true
-            )
-        }
-
-        setPurchases(v140WarmPurchases)
-        setProgress({ current: v140WarmPurchases.length, total: v140WarmPurchases.length, stage: "complete" })
-    }
-
-    if (cachedUnpriced.length === 0) {
-        setLoading(false)
-        return
-    }
-
-    setLoading(true)
-    setProgress({ current: 0, total: cachedUnpriced.length, stage: "pricing" })
-
-    const recoveredByKey = new Map()
-    for (let i = 0; i < cachedUnpriced.length && !cancelled; i += 1) {
-        const original = cachedUnpriced[i]
-        let recovered = original
-        try {
-            recovered = await pricePurchase({
-                ...original,
-                // force pricePurchase to retry a previously failed row
-                usdSpent: null
+// Cached DCA is displayed immediately above. On a cold start, mark the DCA
+// card busy BEFORE the RPC head probes. Those probes can take several seconds
+// on a fresh install; previously the card misleadingly showed N/A during them.
+            setLoading(true)
+            setProgress({
+                current: 0,
+                total: 0,
+                stage: showFullScanPhases ? "history" : "checkpoint",
+                showPhases: showFullScanPhases
             })
-        } catch (error) {
-            recovered = {
-                ...original,
-                pricingError: error?.message ?? original?.pricingError ?? "Unable to retrieve historical USD pricing"
+
+// Cached DCA is displayed immediately above. Now do only a forward scan.
+            const sourceHeads = {}
+            for (const source of DCA_SOURCES) {
+                try {
+                    const rpcList = settings?.rpcs?.[source.network] ?? []
+                    const rpcUrl = Array.isArray(rpcList) ? rpcList[0] : rpcList
+                    const provider = new ethers.providers.JsonRpcProvider(rpcUrl)
+                    const liveHead = await provider.getBlockNumber()
+                    sourceHeads[source.key] = source.maximumBlock == null ? Number(liveHead) : Math.min(Number(liveHead), Number(source.maximumBlock))
+                } catch (error) {
+                    sourceHeads[source.key] = source.maximumBlock ?? null
+                }
             }
-        }
-        const key = `${normalizeAddress(original?.wallet)}:${String(original?.hash ?? original?.transactionHash ?? "").toLowerCase()}`
-        recoveredByKey.set(key, recovered)
-        setProgress({ current: i + 1, total: cachedUnpriced.length, stage: "pricing" })
-    }
 
-    if (cancelled) return
+            // Incremental checks should be cheap. Once a per-chain checkpoint exists,
+            // query the HEX contract logs directly between checkpoint+1 and the live head
+            // instead of paging Blockscout history from newest -> oldest. The explorer v2
+            // endpoint does not apply startBlock server-side, so even a tiny forward check
+            // could otherwise walk many old pages before reaching the checkpoint.
+            // Reuse one RPC provider per network for all wallet checks in this run.
+            // Creating a new JsonRpcProvider for every wallet causes repeated network
+            // detection/handshakes and made a tiny checkpoint scan feel much slower.
+            const incrementalProviders = new Map()
+            const fetchIncrementalIncomingHexLogs = async (wallet, source, startBlock, endBlock) => {
+                if (!Number.isFinite(startBlock) || !Number.isFinite(endBlock) || startBlock > endBlock) return []
+                const rpcList = settings?.rpcs?.[source.network] ?? []
+                const rpcUrl = Array.isArray(rpcList) ? rpcList[0] : rpcList
+                if (!rpcUrl) throw new Error(`No RPC configured for ${source.label}`)
+                let provider = incrementalProviders.get(source.key)
+                if (!provider) {
+                    provider = new ethers.providers.JsonRpcProvider(rpcUrl)
+                    incrementalProviders.set(source.key, provider)
+                }
+                const transferTopic = ethers.utils.id("Transfer(address,address,uint256)")
+                const toTopic = ethers.utils.hexZeroPad(normalizeAddress(wallet), 32)
+                const rows = []
+                const seen = new Set()
+                // Small chunks keep public RPCs happy while still making normal app-to-app
+                // checks only one or two requests. This path is never used for lifetime scans.
+                const chunkSize = source.network === "ethereum" ? 25000 : 50000
+                for (let fromBlock = startBlock; fromBlock <= endBlock; fromBlock += chunkSize) {
+                    const toBlock = Math.min(endBlock, fromBlock + chunkSize - 1)
+                    const logs = await provider.getLogs({
+                        address: HEX_ADDRESS,
+                        fromBlock,
+                        toBlock,
+                        topics: [transferTopic, null, toTopic]
+                    })
+                    for (const log of logs) {
+                        const hash = String(log?.transactionHash ?? "").toLowerCase()
+                        if (!hash || seen.has(hash)) continue
+                        seen.add(hash)
+                        rows.push({
+                            hash,
+                            block: Number(log?.blockNumber ?? 0),
+                            method: "",
+                            timestamp: null,
+                            value: "0",
+                            originating_address: normalizeAddress(wallet),
+                            dca_discovery_source: "incremental-rpc-hex-transfer",
+                            discovered_token_address: HEX_ADDRESS
+                        })
+                    }
+                }
+                return rows
+            }
 
-    const repricedPurchases = v140WarmPurchases.map(p => {
-        const key = `${normalizeAddress(p?.wallet)}:${String(p?.hash ?? p?.transactionHash ?? "").toLowerCase()}`
-        return recoveredByKey.get(key) ?? p
-    })
+            const getIncrementalStartBlock = (wallet, source) => {
+                const cached = cachedWallets[normalizeAddress(wallet)]
+                const checkpoint = Number(cached?.scanCheckpoints?.[source.key])
+                if (Number.isFinite(checkpoint) && checkpoint > 0) return checkpoint + 1
+                const matchingBlocks = (cached?.purchases ?? [])
+                    .filter(p => (p?.networkKey ?? (p?.network === "ethereum" ? "ethereum" : "pulsechain")) === source.key)
+                    .map(p => Number(p?.blockNumber ?? p?.block ?? 0))
+                    .filter(n => Number.isFinite(n) && n > 0)
+                if (matchingBlocks.length > 0) return Math.max(...matchingBlocks) + 1
+                return Number(source.minimumBlock ?? 0)
+            }
 
-    for (const wallet of walletAddresses) {
-        const oldCache = cachedWallets[wallet]
-        if (!oldCache) continue
-        const walletPurchases = repricedPurchases.filter(
-            p => normalizeAddress(p?.wallet) === normalizeAddress(wallet)
-        )
-        cachedWallets[wallet] = writeDcaWalletCache(
-            wallet,
-            walletPurchases,
-            oldCache?.walletErrors ?? {},
-            oldCache?.transactionErrors ?? [],
-            oldCache?.complete === true
-        )
-    }
-
-    setPurchases(repricedPurchases)
-    setProgress({ current: repricedPurchases.length, total: repricedPurchases.length, stage: "complete" })
-    setLoading(false)
-    return
-}
             // v59c: stale wallet history is still being refreshed even when a warm
             // cache is displayed. Keep DCA marked busy so Token P&L does not start
             // its own explorer crawl and rate-limit the Ethereum DCA scan.
@@ -1695,7 +1596,8 @@ if (staleWallets.length === 0) {
             setProgress({
                 current: 0,
                 total: 0,
-                stage: "history"
+                stage: "history",
+                showPhases: showFullScanPhases
             })
 
             try {
@@ -1742,7 +1644,15 @@ if (staleWallets.length === 0) {
                 // incoming ERC-20 transfers and filters HEX locally.
                 for (const walletAddress of staleWallets) {
                     const normalizedWallet = normalizeAddress(walletAddress)
+                    const startBlock = getIncrementalStartBlock(normalizedWallet, source)
+                    const endBlock = Number(sourceHeads[source.key] ?? source.maximumBlock ?? Number.MAX_SAFE_INTEGER)
+                    if (Number.isFinite(endBlock) && startBlock > endBlock) { activities[normalizedWallet] = []; continue }
                     try {
+                        const hasCheckpoint = Number(cachedWallets[normalizedWallet]?.scanCheckpoints?.[source.key]) > 0
+                        if (hasCheckpoint) {
+                            activities[normalizedWallet] = await fetchIncrementalIncomingHexLogs(normalizedWallet, source, startBlock, endBlock)
+                            continue
+                        }
                         activities[normalizedWallet] = await fetchIncomingTokenTransferTransactions(
                             normalizedWallet,
                             HEX_ADDRESS,
@@ -1752,6 +1662,8 @@ if (staleWallets.length === 0) {
                                 maxPages: 100,
                                 delayBetweenPages: 450,
                                 retryAttempts: 2,
+                                startBlock: getIncrementalStartBlock(normalizedWallet, source),
+                                endBlock: sourceHeads[source.key] ?? source.maximumBlock ?? Number.MAX_SAFE_INTEGER,
                                 onProgress: progress => {
                                     setProgress(previous => ({
                                         ...previous,
@@ -1785,8 +1697,22 @@ if (staleWallets.length === 0) {
 
                 for (const walletAddress of staleWallets) {
                     const normalizedWallet = normalizeAddress(walletAddress)
+                    const startBlock = getIncrementalStartBlock(normalizedWallet, source)
+                    const endBlock = Number(sourceHeads[source.key] ?? source.maximumBlock ?? Number.MAX_SAFE_INTEGER)
+                    if (Number.isFinite(endBlock) && startBlock > endBlock) { activities[normalizedWallet] = []; continue }
                     const merged = new Map()
                     let successfulDiscoverySources = 0
+                    const hasCheckpoint = Number(cachedWallets[normalizedWallet]?.scanCheckpoints?.[source.key]) > 0
+                    if (hasCheckpoint) {
+                        try {
+                            const incrementalRows = await fetchIncrementalIncomingHexLogs(normalizedWallet, source, startBlock, endBlock)
+                            activities[normalizedWallet] = incrementalRows
+                            continue
+                        } catch (error) {
+                            // If the fast incremental RPC path is unavailable, preserve the
+                            // existing explorer fallback so DCA verification can still complete.
+                        }
+                    }
 
                     try {
                         const incomingHex = await fetchIncomingTokenTransferTransactions(
@@ -1798,6 +1724,8 @@ if (staleWallets.length === 0) {
                                 maxPages: 100,
                                 delayBetweenPages: 225,
                                 retryAttempts: 3,
+                                startBlock: getIncrementalStartBlock(normalizedWallet, source),
+                                endBlock: sourceHeads[source.key] ?? source.maximumBlock ?? Number.MAX_SAFE_INTEGER,
                                 onProgress: progress => {
                                     setProgress(previous => ({
                                         ...previous,
@@ -1835,8 +1763,8 @@ if (staleWallets.length === 0) {
                                 pageSize: 250,
                                 delayBetweenPages: 175,
                                 retryAttempts: 5,
-                                startBlock: source.minimumBlock ?? 0,
-                                endBlock: source.maximumBlock ?? 99999999,
+                                startBlock: getIncrementalStartBlock(normalizedWallet, source),
+                                endBlock: sourceHeads[source.key] ?? source.maximumBlock ?? 99999999,
                                 tokenAddress: HEX_ADDRESS,
                                 onProgress: progress => {
                                     setProgress(previous => ({
@@ -1884,7 +1812,7 @@ if (staleWallets.length === 0) {
                     // above is byte-for-byte unchanged. The activity source can expose router /
                     // internal purchase transactions that are absent from token-transfer indexes.
                     try {
-                        const activitySupplement = await batchFetchCompleteActivities(
+                        const activitySupplement = !cachedWallets[normalizedWallet] ? await batchFetchCompleteActivities(
                             [normalizedWallet],
                             source.network,
                             settings,
@@ -1906,7 +1834,7 @@ if (staleWallets.length === 0) {
                                     }))
                                 }
                             }
-                        )
+                        ) : { activities: { [normalizedWallet]: [] }, errors: {} }
                         const activityRows = activitySupplement?.activities?.[normalizedWallet] ?? []
                         let activityAdded = 0
                         activityRows.forEach(row => {
@@ -2049,7 +1977,8 @@ if (staleWallets.length === 0) {
                         ethereum: { current: 0, total: initialCandidateTotalsByNetwork.ethereum ?? 0 },
                         pulsechain: { current: 0, total: initialCandidateTotalsByNetwork.pulsechain ?? 0 }
                     },
-                    stage: "transactions"
+                    stage: "transactions",
+                    showPhases: showFullScanPhases
                 })
 
                 const foundPurchases = []
@@ -2348,7 +2277,8 @@ if (staleWallets.length === 0) {
                                     },
                                     mainnet: { current: 0, total: 0 }
                                 },
-                                stage: "transactions"
+                                stage: "transactions",
+                                showPhases: showFullScanPhases
                             })
                         }
                     }
@@ -2536,7 +2466,8 @@ if (staleWallets.length === 0) {
                 setProgress({
                     current: 0,
                     total: foundPurchases.length,
-                    stage: "pricing"
+                    stage: "pricing",
+                    showPhases: showFullScanPhases
                 })
 
                 // v112: Historical pricing used to run completely serially. Keep a
@@ -2564,7 +2495,7 @@ if (staleWallets.length === 0) {
                         } finally {
                             completedPrices += 1
                             if (!cancelled) {
-                                setProgress({ current: completedPrices, total: foundPurchases.length, stage: "pricing" })
+                                setProgress({ current: completedPrices, total: foundPurchases.length, stage: "pricing", showPhases: showFullScanPhases })
                             }
                         }
                     }
@@ -2657,14 +2588,42 @@ if (staleWallets.length === 0) {
                         Object.keys(walletErrorSubset).length === 0 &&
                         walletTxErrors.length === 0
 
+                    const previousCache = cachedWallets[normalizeAddress(wallet)]
+                    const mergedByHash = new Map()
+                    ;[...(previousCache?.purchases ?? []), ...walletPurchases].forEach(purchase => {
+                        const hash = String(purchase?.hash ?? purchase?.transactionHash ?? "").toLowerCase()
+                        const key = `${purchase?.networkKey ?? purchase?.network ?? "unknown"}:${hash}`
+                        if (hash) mergedByHash.set(key, purchase)
+                    })
+                    const mergedWalletPurchases = [...mergedByHash.values()].sort((a, b) => (toUnixSeconds(a?.timestamp) ?? 0) - (toUnixSeconds(b?.timestamp) ?? 0))
+                    const nextCheckpoints = { ...(previousCache?.scanCheckpoints ?? {}) }
+                    for (const source of DCA_SOURCES) {
+                        const head = Number(sourceHeads[source.key])
+                        const sourceError = Object.entries(finalWalletErrors).some(([key]) =>
+                            (key === `${source.key}:general` || key === `${source.key}:${normalizeAddress(wallet)}`)
+                        )
+                        const previousCheckpoint = Number(previousCache?.scanCheckpoints?.[source.key] ?? 0)
+                        const sourceTxError = walletTxErrors.some(error => {
+                            const errorSource = error?.networkKey ?? (error?.network === "ethereum" ? "ethereum" : "pulsechain")
+                            const errorBlock = Number(error?.blockNumber ?? error?.block ?? 0)
+                            // Only a failure in NEWLY discovered post-checkpoint data may hold
+                            // back the checkpoint. Historical cached errors must not force the
+                            // same block range to be scanned forever on every app launch.
+                            return errorSource === source.key && Number.isFinite(errorBlock) && errorBlock > previousCheckpoint
+                        })
+                        if (!sourceError && !sourceTxError && Number.isFinite(head) && head > 0) {
+                            nextCheckpoints[source.key] = head
+                        }
+                    }
                     const walletCache = writeDcaWalletCache(
                         wallet,
-                        walletPurchases,
+                        mergedWalletPurchases,
                         walletErrorSubset,
                         walletTxErrors,
-                        walletScanComplete
+                        walletScanComplete,
+                        nextCheckpoints
                     )
-                    cachedWallets[wallet] = walletCache
+                    cachedWallets[normalizeAddress(wallet)] = walletCache
                 }
 
                 const combinedPurchases = Object.values(cachedWallets).flatMap(item => item?.purchases ?? []).sort((a, b) => (toUnixSeconds(a?.timestamp) ?? 0) - (toUnixSeconds(b?.timestamp) ?? 0))
@@ -2706,7 +2665,8 @@ if (staleWallets.length === 0) {
                     setLoading(false)
                     setProgress(current => ({
                         ...current,
-                        stage: "complete"
+                        stage: "complete",
+                        diagnostic: ""
                     }))
                 }
             }

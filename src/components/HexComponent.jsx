@@ -146,18 +146,26 @@ const HexCard = styled.div`
 export default memo(HexComponentWrapper)
 
 function HexComponentWrapper (props) {
-    const [hide, setHide] = useState(true)
+    const [internalHide, setInternalHide] = useState(true)
+    const controlled = typeof props.expanded === 'boolean'
+    const hide = controlled ? !props.expanded : internalHide
+    const setHide = controlled
+        ? (nextHide) => props.onExpandedChange?.(!nextHide)
+        : setInternalHide
 
-    if (hide) return <div style={{ textAlign: 'right' }}>
-        <div style={{ width: '75px', display: 'inline-block'}} onClick={() => setHide(false)}>
-            <Button textAlign="center">
-                Details
-            </Button>
+    if (hide) {
+        if (controlled) return null
+        return <div style={{ textAlign: 'left' }}>
+            <div style={{ width: '75px', display: 'inline-block'}} onClick={() => setHide(false)}>
+                <Button textAlign="center">
+                    Details
+                </Button>
+            </div>
         </div>
-    </div>
+    }
 
     return <div style={{ position: 'relative' }}>
-        <HexComponent {...props} setHide={setHide}/>
+        <HexComponent {...props} setHide={setHide} hideOwnDetailsButton={controlled}/>
     </div>
 }
 
@@ -166,6 +174,7 @@ function HexComponent ({
     visibleWallets,
     hexPrice,
     setHide,
+    hideOwnDetailsButton = false,
     aliases = {},
     scenarioEnabled = false
     // historyData, priceData, getImage
@@ -300,13 +309,13 @@ function HexComponent ({
     }
 
     return <>
-        <div style={{ textAlign: 'right' }}>
+        {!hideOwnDetailsButton && <div style={{ textAlign: 'left' }}>
             <div style={{ width: '75px', display: 'inline-block'}} onClick={() => setHide(true)}>
                 <Button textAlign="center">
                     Details
                 </Button>
             </div>
-        </div>
+        </div>}
         <Wrapper>
             <div>
                 <div style={{ marginBottom: 20, paddingBottom: 20, borderBottom: '1px solid rgb(50,50,50)', position: 'relative'}}>

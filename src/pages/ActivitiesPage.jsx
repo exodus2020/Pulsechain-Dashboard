@@ -45,26 +45,7 @@ const Wrapper = styled.div`
 
 export default memo(PageCheck)
 function PageCheck (props) {
-    const [ settings, setSettings ] = useAtom(appSettingsAtom)
-
-    if (!settings.config.scanEnabled) {
-        return <Wrapper>
-            <div style={{ marginBottom: 15, position: 'relative', letterSpacing: 0.5 }}>
-                Most Recent Activities
-            </div>
-            <div style={{ fontFamily: 'sans-serif' }}>
-                This feature utilizes the PulseChain Explorer API.<br/>
-                Temporarily enable external calls to the PulseChain Explorer API?
-                <div style={{ fontSize: 14, paddingBottom: 10 }} className="mute">
-                    Note: This can be permanently enabled in the settings menu.
-                </div>
-                <div style={{ width: 300, marginTop: 15 }}>
-                    <Button onClick={() => setSettings(prev => ({ ...prev, config: { ...prev.config, scanEnabled: true } }))} text="Enable Explorer API" textAlign="center"/>
-                </div>
-            </div>
-        </Wrapper>
-    }
-
+    const [ settings ] = useAtom(appSettingsAtom)
     return <ActivitiesPage {...props} settings={settings} />
 }
 

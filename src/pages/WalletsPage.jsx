@@ -144,6 +144,7 @@ function WalletsPage ({
     const watchlist = data?.watchlist ?? {}
     const [ hideZeroValue, setHideZeroValue ] = useAtom(hideZeroValueAtom)
     const [ hideHexMiners, setHideHexMiners ] = useAtom(hideHexMinersAtom)
+    const [hexMinerDetailsOpen, setHexMinerDetailsOpen] = useState(false)
     const [ selectedTimeframe ] = useAtom(timeframeAtom)
     const [ pulseMetrics, setPulseMetrics ] = useState([])
     const [ cachedPulseOverrides, setCachedPulseOverrides ] = useState(() => {
@@ -739,7 +740,15 @@ const incRewards =
 
 const hasIncFarmActivity =
     Boolean(incRewards) || incPerDay > 0
-const hasHexStakes = hexData?.combinedStakes.length > 0
+const hasHexStakes = (hexData?.combinedStakes?.length ?? 0) > 0
+const hasTrackedWallets = Object.keys(data?.wallets ?? {}).length > 0
+const CORE_WATCHLIST_TOKENS = new Set([
+    '0xa1077a294dde1b09bb078844df40758a5d0f9a27', // PLS/WPLS
+    '0x95b303987a60c71504d99aa1b13b4da07b0790ab', // PLSX
+    '0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d', // INC
+    '0x2b591e99afe9f32eaa6214f7b7629768c40eeb39', // HEX
+    '0xf6f8db0aba00007681f8faf16a0fda1c9b030b11'  // PRVX
+])
 
     return <Wrapper>
         {pricesLoaded ? <div>
@@ -792,7 +801,7 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                             <Icon icon={icons_list?.[hideZeroValue ? 'no-circle' : 'circle']} size={15}/> 
                         </Button>
                     </Tooltip>
-                    {hasHexStakes && <Tooltip content={hideHexMiners ? 'Show Hex Miners' : 'Hide Hex Miners'}>
+                    {<Tooltip content={hideHexMiners ? 'Show Hex Miners' : 'Hide Hex Miners'}>
                         <Button parentStyle={{ width: 50, display: 'inline-block', marginRight: 5 }} textAlign={'center'} onClick={() => setHideHexMiners(!hideHexMiners)} customClass={`${hideHexMiners ? 'hex-icon-off' : 'hex-icon-on'}`}>
                             <Icon icon={icons_list?.['hex']} size={15}/> 
                         </Button>
@@ -850,11 +859,11 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                     pulseMetrics={cachedPulseOverrides}
                 />
             </div>
-            {hasHexStakes ? <div>
-                <StakeComponent visibleWallets={visibleWallets} disabled={hideHexMiners} hexData={hexData} hexDcaData={hexDcaData} hexTokenPnl={tokenPnlData?.positions?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} hexWalletPositions={tokenPnlData?.walletPositions ?? {}} walletBalances={balances ?? {}} hexPrice={{ ...(prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39'] ?? {}), priceUsd: scenarioHexPriceUsd }} hiddenWallets={hiddenWallets} liquidHexUnits={Number(addressData?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']?.normalized ?? 0)} scenarioEnabled={scenarioEnabled}/>
+            <div>
+                <StakeComponent visibleWallets={visibleWallets} disabled={hideHexMiners} hexData={hexData} hexDcaData={hexDcaData} hexTokenPnl={tokenPnlData?.positions?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']} hexWalletPositions={tokenPnlData?.walletPositions ?? {}} walletBalances={balances ?? {}} hexPrice={{ ...(prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39'] ?? {}), priceUsd: scenarioHexPriceUsd }} hiddenWallets={hiddenWallets} liquidHexUnits={Number(addressData?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39']?.normalized ?? 0)} scenarioEnabled={scenarioEnabled} minerDetailsOpen={hexMinerDetailsOpen} onToggleMinerDetails={() => setHexMinerDetailsOpen(value => !value)}/>
 
-                {!hideHexMiners && <HexComponent hexData={hexData} visibleWallets={visibleWallets} hexPrice={{ ...(prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39'] ?? {}), priceUsd: scenarioHexPriceUsd }} aliases={data?.aliases ?? {}} scenarioEnabled={scenarioEnabled}/>} 
-            </div> : ''}
+                {!hideHexMiners && hasTrackedWallets && <HexComponent expanded={hexMinerDetailsOpen} onExpandedChange={setHexMinerDetailsOpen} hexData={hexData} visibleWallets={visibleWallets} hexPrice={{ ...(prices?.['0x2b591e99afe9f32eaa6214f7b7629768c40eeb39'] ?? {}), priceUsd: scenarioHexPriceUsd }} aliases={data?.aliases ?? {}} scenarioEnabled={scenarioEnabled}/>} 
+            </div>
             <div>
                 <div style={{ position: 'relative', minHeight: tokenPnlData?.loading ? 76 : 28, width: '100%', marginTop: 40 }}>
                     <div style={{ position: 'absolute', left: 0, top: 0, letterSpacing: 0.5 }} >
@@ -959,7 +968,11 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                             : Object.keys(liquidityPairs).find(pairId => liquidityPairs[pairId]?.token0?.id.toLowerCase() === token.toLowerCase() || liquidityPairs[pairId]?.token1?.id.toLowerCase() === token.toLowerCase())
                         const tokenAddress = watchlistData ? watchlistData?.token?.address : token
 
-                        const hide = (parseFloat(addressData?.[tokenAddress]?.normalized ?? 0) < .001) && hideZeroValue 
+                        // The five core PulseChain coins are permanent watchlist rows.
+                        // They stay visible even with no wallets / zero balance; the hide-zero
+                        // toggle only suppresses other zero-balance tokens.
+                        const isCoreWatchlistToken = CORE_WATCHLIST_TOKENS.has(String(tokenAddress ?? token).toLowerCase())
+                        const hide = !isCoreWatchlistToken && (parseFloat(addressData?.[tokenAddress]?.normalized ?? 0) < .001) && hideZeroValue
                         
                         if (hide) return null 
 
@@ -973,6 +986,7 @@ const hasHexStakes = hexData?.combinedStakes.length > 0
                             getImage={getImage} 
                             priceArray={priceArray}
                             tokenPnl={tokenPnlData?.positions?.[tokenAddress?.toLowerCase()]}
+                            hexDcaData={hexDcaData}
                             tokenPnlLoading={tokenPnlData?.loading === true && (tokenPnlData?.activeTokens ?? []).includes(tokenAddress?.toLowerCase())}
                             scenarioEnabled={scenarioEnabled}
                             scenarioPriceUsd={scenarioPriceFor(tokenAddress)}

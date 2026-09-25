@@ -341,6 +341,31 @@ export const AppContextProvider = ({ children }) => {
 
         setUpdate(prev => prev + 1)
     }
+    // Add-only variant used by automatic held-token discovery. Unlike the
+    // manual toggle helper, re-discovering a token can never remove it.
+    const massAddWatchlist = (watchlistDataArray) => {
+        if (!Array.isArray(watchlistDataArray) || watchlistDataArray.length === 0) return
+
+        setData(prev => {
+            const newWatchList = { ...(prev?.watchlist ?? {}) }
+            let changed = false
+
+            watchlistDataArray.forEach(watchlistData => {
+                const id = String(watchlistData?.id ?? '').toLowerCase()
+                if (!id || newWatchList[id]?.id) return
+                newWatchList[id] = watchlistData
+                changed = true
+            })
+
+            if (!changed) return prev
+            const newData = { ...prev, watchlist: newWatchList }
+            saveData(newData)
+            return newData
+        })
+
+        setUpdate(prev => prev + 1)
+    }
+
     const massToggleWatchlist = (watchlistDataArray) => {
         if (!Array.isArray(watchlistDataArray) || watchlistDataArray.length === 0) return;
 
@@ -491,6 +516,7 @@ export const AppContextProvider = ({ children }) => {
             unhideToken,
             unhideAllTokens,
             massToggleWatchlist,
+            massAddWatchlist,
             toggleLPWatchlist,
             massToggleLPWatchlist,
             updateImageUrReference, 

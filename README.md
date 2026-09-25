@@ -4,6 +4,85 @@ Privacy-first PulseChain portfolio tracker with real-time pricing, historical co
 
 > Built for privacy. Runs locally. No tracking. No middlemen.
 
+## 🚀 v2.4.2 — HEX DCA Accuracy, Purchase Timeline & Portfolio Reliability
+
+Version 2.4.2 is a major reliability and accuracy update for **HEX DCA/P&L, fresh-wallet discovery, token tracking, and cached portfolio restoration**. It also adds a visual HEX purchase-history timeline and more efficient incremental DCA scans.
+
+### 🎯 More Accurate HEX DCA & P&L
+- Improved historical HEX cost-basis reconstruction using **hour-level historical pricing** for supported purchase paths instead of relying on coarse daily pricing.
+- Historical swaps are valued using the asset exchanged for HEX at approximately the transaction hour, improving reconstructed USD spend and average entry calculations.
+- Corrected liquid HEX P&L so current HEX that was not represented by a paid purchase does not incorrectly create a near-zero cost basis or absurd percentage returns.
+- Refined HEX Miner fallback cost-basis handling so active-stake P&L remains tied to reconstructed lifetime HEX purchase history when a more specific basis cannot be established.
+- HEX DCA remains separated by **Ethereum and PulseChain**, with network-specific HEX purchased, historical spend, average entry price, and purchase counts.
+- DCA/P&L values remain estimates reconstructed from available on-chain history and historical market pricing and are intended for portfolio analytics rather than tax accounting.
+
+### 📊 HEX Purchase History Timeline
+- Added a dedicated **Details** view beneath HEX Miner DCA for visualizing reconstructed HEX purchases over time.
+- Ethereum and PulseChain purchases share the same time axis for direct chronological comparison.
+- Ethereum purchases extend **above** the center line in blue while PulseChain purchases extend **below** it in purple.
+- Purchases occurring on the same day are combined into a single bar.
+- Hovering a purchase bar immediately shows the date, total HEX purchased, total USD paid, and average price per HEX.
+- Purchase-bar heights use adaptive logarithmic scaling so both small and large purchases remain visually distinguishable.
+- Ethereum and PulseChain magnitudes are scaled independently using the currently visible wallets, and the chart automatically rescales when wallets are shown or hidden.
+- Increased chart height and hover targets for easier inspection of individual purchase days.
+
+### 🔎 Expanded DCA Details & Progress
+- Added summary cards for total HEX purchased, total historical spend, purchase count, and current HEX price.
+- Restored network-specific DCA information in the DCA tooltip.
+- Moved the DCA **Details** control beneath the DCA card and kept it persistent alongside HEX Miner Details.
+- Full or newly required DCA reconstruction once again exposes the **Scanning → Verifying → Calculating** workflow instead of silently rebuilding in the background.
+- Adding a new wallet now triggers visible DCA progress when that wallet requires new historical data, while already cached wallets remain reusable.
+- New-wallet rebuilds display the same detailed **Scanning → Verifying → Calculating** status information used during a cold-cache reconstruction, including scan progress beneath the DCA card.
+
+### ⚡ Persistent & Incremental HEX DCA Cache
+- HEX purchase history is saved persistently after a completed historical reconstruction.
+- On later launches, the dashboard restores saved DCA/history immediately and checks only the blockchain range after the saved scan checkpoint for new purchases.
+- Incremental checks use narrow RPC log ranges rather than repeating the full lifetime reconstruction.
+- Scan checkpoints advance after successful checks so subsequent launches inspect only newly created blocks.
+- Clearing the application cache intentionally removes the saved reconstruction and triggers a full historical HEX purchase scan again.
+- Improved incremental-refresh diagnostics and fallback handling while preserving the known-good lifetime reconstruction path for a cold scan.
+
+### 🪙 Token Discovery, Watchlist & Pricing Fixes
+- Fresh installs and erased-data starts now populate the **five core tokens — PLS/WPLS, PLSX, INC, HEX, and PRVX —** in the Token Watchlist even before a wallet is added.
+- Tokens discovered in tracked wallets are automatically added to the watchlist and can still be hidden later.
+- Fixed duplicate watchlist entries caused by the same token being discovered through multiple liquidity/pair sources; discovered tokens are deduplicated by chain and contract.
+- Improved PRVX price discovery so a clean start no longer leaves PRVX displaying an all-zero price when market data is available.
+- Fixed clean-start portfolio restoration issues where wallet value could be visible in the wallet manager without appearing in the main portfolio total.
+- HEX Miners now remains visible in its empty state even when no wallet or active HEX stake is present.
+
+### ⚙️ Settings & Clean-Start Behavior
+- **External Token Images** now defaults to enabled for fresh/erased application data.
+- PulseChain Explorer access required by dashboard calculations is no longer presented as an optional enable/disable setting.
+- Custom PulseChain RPC configuration remains available for users who need to change RPC providers.
+- Improved behavior after **Erase All Data** and cache clears so core UI sections repopulate consistently during a completely fresh start.
+
+### 🎨 UI & Quality-of-Life
+- Purchase-history Details and HEX Miner Details can remain independently open/available without hiding one another's controls.
+- Refined chart spacing, bar widths, scaling, labels, and hover behavior for easier visual comparison across long wallet histories.
+- Prevented temporary/incomplete DCA reconstruction states from being mistaken for the final reconstructed cost basis once the scan completes.
+- Improved progress-state consistency when adding uncached wallets after DCA data has already been restored from cache.
+
+### 📸 HEX Purchase History
+
+<table>
+<tr>
+<td align="center"><strong>HEX Purchase History Timeline</strong></td>
+<td align="center"><strong>Adaptive Logarithmic Purchase Scale</strong></td>
+</tr>
+<tr>
+<td align="center"><img src="public/Screenshots/2.4.2/HEX%20Purchase%20History%20Chart.png" width="500" alt="HEX Purchase History Timeline"></td>
+<td align="center"><img src="public/Screenshots/2.4.2/Logarithmic%20Scale%20for%20purchases.png" width="500" alt="HEX Purchase History Adaptive Logarithmic Scale"></td>
+</tr>
+<tr>
+<td align="center">Compare Ethereum purchases above the shared timeline with PulseChain purchases below it, with one bar per purchase day.</td>
+<td align="center">Adaptive logarithmic scaling keeps purchases of very different sizes visually distinct while preserving immediate hover details for each purchase day.</td>
+</tr>
+</table>
+
+> **Note:** HEX DCA and P&L values are estimates reconstructed from available on-chain transaction history and historical pricing. They are intended for portfolio analytics and may differ from tax or accounting cost basis.
+
+---
+
 ## 🚀 v2.4.1 — HEX DCA, Active-Stake Cost Basis & Performance
 
 Version 2.4.1 focuses on **HEX cost-basis accuracy, active-stake P&L, multi-wallet accounting, and dramatically faster cached startup**, while preserving the Scenario Mode introduced in v2.4.0.
@@ -269,13 +348,6 @@ https://github.com/exodus2020/Pulsechain-Dashboard/releases
 
 ---
 
-## 🌐 Web Version
-
-Prefer browser access?
-👉 https://plsdashboard.link/
-
----
-
 ## 🧠 What is PulseChain Dashboard?
 
 PulseChain Dashboard is an open-source desktop application that lets you track your PulseChain portfolio and interact with the ecosystem — without relying on centralized services.
@@ -293,13 +365,13 @@ All data is stored locally and encrypted for maximum privacy.
 * 📈 Amount-weighted average entry prices across multiple wallets
 * 👛 Track and combine multiple wallets with independent cost-basis accounting
 * 🔄 Cost-basis preservation across wallet-to-wallet token transfers
-* ⚡ Persistent P&L caching for faster startup and wallet switching
+* ⚡ Persistent P&L and HEX DCA caching with incremental new-block purchase checks
 * 💧 Monitor PulseX liquidity positions
 * 🌾 View farming positions, rewards, and estimated INC/day
 * 🧾 HEX stake tracking and analytics
 * ⛏️ Active HEX Miner DCA, cost basis, and P&L tracking
 * 🔎 Detailed active-stake and lifetime HEX purchase breakdowns by wallet and network
-* 📈 Lifetime HEX DCA tracking across Ethereum & PulseChain
+* 📈 Lifetime HEX DCA tracking across Ethereum & PulseChain with an interactive purchase timeline
 * 📉 Real-time token pricing and historical price charts
 * 🔎 Scan wallets for PulseChain tokens and manage custom watchlists
 * 🔐 Fully local + encrypted portfolio storage

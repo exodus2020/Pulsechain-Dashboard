@@ -14,7 +14,7 @@ const HEX_ADDRESS = '0x2b591e99afe9f32eaa6214f7b7629768c40eeb39'
 const background = 'linear-gradient(to bottom, rgba(50, 50, 50, 0.3), rgba(50, 50, 50, 0.1))'
 
 export default memo(SingleTokenButton)
-function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, watchlistData, tokenPnl, tokenPnlLoading = false, token = undefined, tokenAddress = undefined, scenarioEnabled = false, scenarioPriceUsd = null, scenarioAffected = false }) {
+function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, watchlistData, tokenPnl, hexDcaData = null, tokenPnlLoading = false, token = undefined, tokenAddress = undefined, scenarioEnabled = false, scenarioPriceUsd = null, scenarioAffected = false }) {
     const [ singleTokenModal, setSingleTokenModal ] = useAtom(tokenModalAtom)
     const tokenAddresses = token ? [token] :priceArray.filter(f => prices[f]?.pairId === pairId);
     const context = useAppContext()
@@ -167,25 +167,58 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
         Number.isFinite(effectiveAverageEntry) &&
         effectiveAverageEntry > 0
 
+    const rawLedgerBasis = Number(tokenPnl?.costBasisUsd ?? NaN)
+    const hexDcaPaidBasis = Number(hexDcaData?.stats?.totalUsdSpent ?? 0)
+    const hexDcaPaidPurchases = Number(hexDcaData?.stats?.pricedPurchaseCount ?? hexDcaData?.stats?.purchaseCount ?? 0)
+
+    // V2.4.2 surgical HEX P&L rule: the dedicated HEX purchase scanner is the
+    // authority for known paid HEX spend. Current HEX that is not represented by
+    // those paid purchases (for example fork-copied/state-derived HEX) adds no
+    // *new* purchase cost here. This intentionally leaves the DCA scanner itself
+    // untouched and prevents a tiny generic-ledger basis from creating absurd
+    // near-infinite percentage gains.
+    const hasHexDcaBasis =
+        isHex &&
+        Number.isFinite(balanceTokensRaw) && balanceTokensRaw > 0 &&
+        Number.isFinite(hexDcaPaidBasis) && hexDcaPaidBasis > 0 &&
+        hexDcaPaidPurchases > 0
+
+    const pnlAverageEntry = hasHexDcaBasis
+        ? hexDcaPaidBasis / balanceTokensRaw
+        : effectiveAverageEntry
+
     const hasPositiveBasis =
-        Number.isFinite(effectiveAverageEntry) &&
-        effectiveAverageEntry > 0 &&
+        Number.isFinite(pnlAverageEntry) &&
+        pnlAverageEntry > 0 &&
         Number.isFinite(balanceTokensRaw) &&
         balanceTokensRaw > 0
+
+    // Retained only as a defensive state for HEX when no usable dedicated paid
+    // basis exists. A valid HEX DCA paid basis always wins over the generic ledger.
+    const hasHexBasisConflict =
+        isHex && !hasHexDcaBasis &&
+        Number.isFinite(balanceTokensRaw) && balanceTokensRaw > 0 &&
+        (!Number.isFinite(rawLedgerBasis) || rawLedgerBasis <= 0) &&
+        Number.isFinite(hexDcaPaidBasis) && hexDcaPaidBasis > 0 &&
+        hexDcaPaidPurchases > 0
+
     const hasKnownZeroBasis =
+        !isHex &&
         exactCoverage &&
         Number.isFinite(balanceTokensRaw) && balanceTokensRaw > 0 &&
-        Number(tokenPnl?.costBasisUsd ?? NaN) === 0 &&
+        rawLedgerBasis === 0 &&
         Number(tokenPnl?.pricedAcquisitionCount ?? 0) > 0 &&
         Number(tokenPnl?.unpricedAcquisitionCount ?? 0) === 0
-    const hasPnl = hasPositiveBasis || hasKnownZeroBasis
+    const hasPnl = !hasHexBasisConflict && (hasPositiveBasis || hasKnownZeroBasis)
 
     // Combined-wallet P&L stays properly amount weighted: the hook sums each
     // visible wallet's basis and units first. When a partial estimate is needed,
     // that aggregate weighted entry is applied to the selected balance.
-    const pnlCostBasis = hasPositiveBasis
-        ? effectiveAverageEntry * balanceTokensRaw
-        : hasKnownZeroBasis ? 0 : null
+    const pnlCostBasis = hasHexDcaBasis
+        ? hexDcaPaidBasis
+        : hasPositiveBasis
+            ? pnlAverageEntry * balanceTokensRaw
+            : hasKnownZeroBasis ? 0 : null
 
     const pnlUsd = hasPnl ? balanceUsdRaw - pnlCostBasis : null
     const pnlPercent = hasPositiveBasis && pnlCostBasis > 0
@@ -217,7 +250,7 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
             <strong>Estimated P&L</strong>
             <br/><br/>
             Avg Entry<br/>
-            {hasKnownZeroBasis ? '$ 0.00 (zero-basis receipt)' : <>$ {formatNumber(effectiveAverageEntry, true, true)}</>}
+            {hasKnownZeroBasis ? '$ 0.00 (zero-basis receipt)' : <>$ {formatNumber(pnlAverageEntry, true, true)}</>}
             <br/><br/>
             Cost Basis<br/>
             $ {addCommasToNumber(Number(pnlCostBasis ?? 0).toFixed(2))}
@@ -232,13 +265,15 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
                 {isPrvxMaxMultiplierEstimate
                     ? 'PRVX sacrifice-distribution cost basis uses a maximum-multiplier baseline of 8.36M PRVX per $700 sacrificed. Ordinary PRVX purchases use their reconstructed spend when available.'
                     : 'P&L values are estimates reconstructed from on-chain transaction history and historical market pricing.'}
-                {usedStakeFallback && !isPrvxMaxMultiplierEstimate ? ' Liquid HEX basis uses the amount-weighted active-stake entry as a fallback because the liquid explorer history is incomplete.' : ''}{usedPartialEstimate && !usedStakeFallback && !isPrvxMaxMultiplierEstimate ? ` Current-position coverage is ${(reconstructionCoverage * 100).toFixed(1)}%; the weighted reconstructed entry is extrapolated to the selected balance.` : ''}
+                {hasHexDcaBasis && !isPrvxMaxMultiplierEstimate ? ' HEX P&L uses the priced spend found by the dedicated HEX purchase history. Current HEX not represented by a paid purchase adds no new purchase cost; the DCA calculation itself is unchanged.' : ''}{!hasHexDcaBasis && usedStakeFallback && !isPrvxMaxMultiplierEstimate ? ' Liquid HEX basis uses the amount-weighted active-stake entry as a fallback because the liquid explorer history is incomplete.' : ''}{!hasHexDcaBasis && usedPartialEstimate && !usedStakeFallback && !isPrvxMaxMultiplierEstimate ? ` Current-position coverage is ${(reconstructionCoverage * 100).toFixed(1)}%; the weighted reconstructed entry is extrapolated to the selected balance.` : ''}
             </span>
         </div>
     ) : (
         <div style={{ textAlign: 'center', maxWidth: 250 }}>
             {tokenPnlLoading
                 ? 'Reconstructing on-chain cost basis'
+                : hasHexBasisConflict
+                    ? `HEX purchase history contains $${addCommasToNumber(hexDcaPaidBasis.toFixed(2))} of priced purchases, but the generic token ledger returned a zero/unknown liquid basis. P&L is hidden rather than reporting a misleading near-infinite gain.`
                 : tokenPnl && balanceTokensRaw > 0 && reconstructionCoverage < 0.50 && !canUseHexStakeFallback
                     ? `Cost-basis coverage is only ${(reconstructionCoverage * 100).toFixed(1)}%. P&L remains unavailable rather than extrapolating from less than half of the position.`
                     : tokenPnl?.complete === false && reconstructionCoverage < 0.98

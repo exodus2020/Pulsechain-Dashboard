@@ -12,6 +12,28 @@ import ImgWBTC from "../icons/wbtc.png"
 import axios from "axios"
 
 export const liquidityPairs = {
+      // PRVX/WPLS preferred liquid market. Keeping PRVX in the built-in pair
+      // table means a completely fresh install can price PRVX before any
+      // watchlist/cache data exists.
+      '0x62f7d076c92db76cf84223b6309801ea461d7afe': {
+        "id": "0x62f7d076c92db76cf84223b6309801ea461d7afe",
+        "a": '0xf6f8db0aba00007681f8faf16a0fda1c9b030b11',
+        "name": "PRVX-WPLS",
+        "reserve0": "0",
+        "reserve1": "0",
+        "token0": {
+          "id": "0xf6f8db0aba00007681f8faf16a0fda1c9b030b11",
+          "name": "ProveX",
+          "symbol": "PRVX",
+          "decimals": "18"
+        },
+        "token1": {
+          "id": "0xa1077a294dde1b09bb078844df40758a5d0f9a27",
+          "name": "Wrapped Pulse",
+          "symbol": "WPLS",
+          "decimals": "18"
+        }
+      },
       '0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9': {
         "id": "0x1b45b9148791d3a104184cd5dfe5ce57193a3ee9",
         "a": '0x95b303987a60c71504d99aa1b13b4da07b0790ab',

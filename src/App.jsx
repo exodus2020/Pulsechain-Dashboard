@@ -27,6 +27,7 @@ import WalletsPage from './pages/WalletsPage'
 import useHex from './hooks/useHex'
 import useHexDca from "./hooks/useHexDca"
 import useTokenPnl from "./hooks/useTokenPnl"
+import useTokenSearch from "./hooks/useTokenSearch"
 import DeleteDataModal from './shared/DeleteDataModal'
 import Button from './components/Button'
 import Icon from './components/Icon'
@@ -158,6 +159,68 @@ function AppMain({context}) {
 
   useUpdateSettings({ context })
   const priceData = usePrice(context)
+  const wplsPriceForDiscovery = priceData?.prices?.['0xa1077a294dde1b09bb078844df40758a5d0f9a27']?.priceUsd ?? 0
+  const walletAddressesForDiscovery = Object.keys(context?.data?.wallets ?? {})
+  const watchlistAddressesForDiscovery = Object.values(context?.data?.watchlist ?? {})
+    .map(item => String(item?.token?.address ?? '').toLowerCase())
+    .filter(Boolean)
+  const autoTokenDiscovery = useTokenSearch({
+    searchTerm: '',
+    wallets: walletAddressesForDiscovery,
+    watchlistAddresses: watchlistAddressesForDiscovery,
+    wplsPrice: wplsPriceForDiscovery
+  })
+  const autoScanWalletKey = walletAddressesForDiscovery.slice().sort().join('|')
+  const lastAutoScanKey = useRef('')
+
+  // A clean install has an empty watchlist. Once WPLS has a live price, scan
+  // each newly-added wallet for held tokens and add liquid non-core holdings
+  // automatically. Core assets are already built into the dashboard.
+  useEffect(() => {
+    if (!autoScanWalletKey || Number(wplsPriceForDiscovery) <= 0) return
+    if (lastAutoScanKey.current === autoScanWalletKey) return
+    lastAutoScanKey.current = autoScanWalletKey
+    autoTokenDiscovery.scanForTokens().catch(error => {
+      console.warn('[Auto token discovery] scan failed', error)
+      lastAutoScanKey.current = ''
+    })
+  }, [autoScanWalletKey, wplsPriceForDiscovery])
+
+  useEffect(() => {
+    // The five core dashboard assets are already rendered from the built-in
+    // balance pipeline. Never add them to the custom watchlist as discovered
+    // tokens, otherwise a clean scan produces duplicate HEX/PLSX/INC/etc rows.
+    const coreTokenAddresses = new Set([
+      '0xa1077a294dde1b09bb078844df40758a5d0f9a27', // WPLS / PLS
+      '0x95b303987a60c71504d99aa1b13b4da07b0790ab', // PLSX
+      '0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d', // INC
+      '0x2b591e99afe9f32eaa6214f7b7629768c40eeb39', // HEX
+      '0xf6f8db0aba00007681f8faf16a0fda1c9b030b11'  // PRVX
+    ])
+
+    const discovered = Array.isArray(autoTokenDiscovery.data)
+      ? autoTokenDiscovery.data
+          .filter(item => !item?.isSelectableDefault)
+          .map(item => {
+            const isToken0Wpls = String(item?.token0?.id ?? '').toLowerCase() === '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
+            const token = isToken0Wpls ? item?.token1 : item?.token0
+            return {
+              ...item,
+              token: {
+                address: token?.id,
+                name: token?.name,
+                symbol: token?.symbol
+              }
+            }
+          })
+          .filter(item => item?.id && item?.token?.address && Number(item?.balance ?? 0) > 0)
+          .filter(item => !coreTokenAddresses.has(String(item.token.address).toLowerCase()))
+          .filter(item => !context?.data?.hiddenTokens?.[String(item.token.address).toLowerCase()])
+      : []
+
+    if (discovered.length > 0) context?.massAddWatchlist?.(discovered)
+  }, [autoTokenDiscovery.data])
+
   const balanceData = useGetBalance(priceData)
   const farmData = useFarms({context, priceData})
   const hexData = useHex({ wallets: context?.data?.wallets ?? {} })
