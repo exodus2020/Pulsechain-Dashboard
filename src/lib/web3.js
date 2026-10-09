@@ -3,7 +3,7 @@ import axios from "axios"
 import { plpAbi } from "./abi/plp-abi"
 import { ethers } from 'ethers'
 import { defaultSettings } from "../config/settings"
-import Web3 from 'web3'
+import Web3 from './web3Vendor.js'
 import { plsxFactoryAbi } from "./abi/plsx-factory-abi"
 
 // Update ERC20 ABI to proper format for Web3.js
@@ -90,8 +90,24 @@ const waitForExplorerRetry = milliseconds => {
 // the same public explorer at once and trigger 429s. Keep this gate local to
 // Ethereum so PulseChain discovery remains fast.
 let ethereumExplorerNextRequestAt = 0
+// v169: PulseChain candidate verification can launch many explorer-detail requests
+// concurrently. Browser and Electron then see different subsets when Blockscout
+// throttles the burst. Reserve lightweight PulseChain slots too: this avoids the
+// thundering herd without serializing the much slower Ethereum lane.
+let pulsechainExplorerNextRequestAt = 0
 const waitForEthereumExplorerSlot = async (endpoint, minimumSpacingMs = 1800) => {
-    if (!String(endpoint).includes("eth.blockscout.com")) return
+    const endpointText = String(endpoint)
+    if (!endpointText.includes("eth.blockscout.com")) {
+        if (endpointText.includes("scan.pulsechain.com")) {
+            const spacingMs = Math.max(150, Math.min(500, Number(minimumSpacingMs) || 250))
+            const now = Date.now()
+            const reservedAt = Math.max(now, pulsechainExplorerNextRequestAt)
+            pulsechainExplorerNextRequestAt = reservedAt + spacingMs
+            const waitMs = Math.max(0, reservedAt - now)
+            if (waitMs > 0) await waitForExplorerRetry(waitMs)
+        }
+        return
+    }
 
     // V151: reserve the slot BEFORE waiting. Previously concurrent callers all
     // observed the same next-request timestamp, slept together, then woke up
@@ -138,14 +154,28 @@ const fetchExplorerPageWithRetry = async (
 
             if (attempt < attempts) {
                 const retryAfter = Number(error?.response?.headers?.["retry-after"] ?? 0)
+                const isEthereumExplorer = String(endpoint).includes("eth.blockscout.com")
+                const isPulsechainExplorer = String(endpoint).includes("scan.pulsechain.com")
                 const retryMs = status === 429
-                    ? Math.max(15000, retryAfter * 1000, attempt * 10000)
+                    ? (isPulsechainExplorer
+                        ? Math.max(2500, retryAfter * 1000, attempt * 2000)
+                        : Math.max(15000, retryAfter * 1000, attempt * 10000))
                     : status === 503
-                        ? Math.max(8000, attempt * 5000)
+                        ? (isPulsechainExplorer ? Math.max(2500, attempt * 2000) : Math.max(8000, attempt * 5000))
                         : attempt * 1500
-                if (String(endpoint).includes("eth.blockscout.com")) {
+                if (isEthereumExplorer) {
                     ethereumExplorerNextRequestAt = Math.max(
                         ethereumExplorerNextRequestAt,
+                        Date.now() + retryMs
+                    )
+                }
+                // v170: reserve the PulseChain cooldown globally too. Without this,
+                // several workers that receive 429/503 can all wake together and create
+                // another burst, which is exactly the kind of run-to-run variance seen
+                // between browser and Electron parity scans.
+                if (isPulsechainExplorer) {
+                    pulsechainExplorerNextRequestAt = Math.max(
+                        pulsechainExplorerNextRequestAt,
                         Date.now() + retryMs
                     )
                 }
@@ -726,6 +756,60 @@ export const fetchExplorerTransaction = async (
         retryAttempts,
         minimumSpacingMs
     )
+}
+
+/**
+ * v180: Fetch ALL token-transfer legs for one transaction. Blockscout's
+ * /transactions/:hash record can expose only a partial token_transfers array
+ * (commonly 10 rows). That made purchase classification depend on whether the
+ * RPC happened to supply the omitted HEX leg. Walk the dedicated paginated
+ * token-transfers endpoint so browser and Electron classify the same data.
+ */
+export const fetchExplorerTransactionTokenTransfers = async (
+    transactionHash,
+    network = "mainnet",
+    settings = defaultSettings,
+    options = {}
+) => {
+    const { retryAttempts = 4, minimumSpacingMs = 500, maxPages = 20 } = options
+    if (!transactionHash) throw new Error("A transaction hash is required")
+    const configured = settings?.scan?.[network]
+    const legacyBase = Array.isArray(configured) ? configured[0] : configured
+    if (!legacyBase) throw new Error(`No explorer API is configured for network: ${network}`)
+    const origin = legacyBase.replace(/\/api\/?$/i, "")
+    const endpoint = `${origin}/api/v2/transactions/${transactionHash}/token-transfers`
+    const rows = []
+    const seen = new Set()
+    const seenCursors = new Set()
+    let cursor = null
+    let page = 0
+    do {
+        if (page >= maxPages) throw new Error(`Transaction token transfers exceeded ${maxPages} pages for ${transactionHash}`)
+        const data = await fetchExplorerPageWithRetry(endpoint, cursor ?? {}, retryAttempts, minimumSpacingMs)
+        const items = Array.isArray(data?.items) ? data.items : []
+        for (const transfer of items) {
+            const normalized = {
+                tokenAddress: getTokenAddress(transfer),
+                from: getAddress(transfer?.from),
+                to: getAddress(transfer?.to),
+                value: transfer?.total?.value ?? transfer?.value ?? "0"
+            }
+            if (!normalized.tokenAddress || !normalized.from || !normalized.to) continue
+            // v190: rollback the v189 log-index identity change. Blockscout's log-index
+            // field is not stable across the partial snapshots we are unioning, so using it
+            // as identity can preserve duplicate representations of the same transfer leg.
+            const key = [normalized.tokenAddress, normalized.from, normalized.to, String(normalized.value)].map(x => String(x).toLowerCase()).join(":")
+            if (!seen.has(key)) { seen.add(key); rows.push(normalized) }
+        }
+        cursor = data?.next_page_params ?? null
+        if (cursor) {
+            const key = JSON.stringify(cursor)
+            if (seenCursors.has(key)) throw new Error(`Explorer repeated transaction-transfer cursor for ${transactionHash}`)
+            seenCursors.add(key)
+        }
+        page += 1
+    } while (cursor)
+    return rows
 }
 
 // Helper function to create RPC provider with fallback

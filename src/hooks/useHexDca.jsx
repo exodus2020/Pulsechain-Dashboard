@@ -8,6 +8,7 @@ import {
     batchFetchTokenInfo,
     decodeTransferLogs,
     fetchExplorerTransaction,
+    fetchExplorerTransactionTokenTransfers,
     PULSECHAIN_FIRST_BLOCK
 } from "../lib/web3"
 import { defaultSettings } from "../config/settings"
@@ -27,6 +28,11 @@ const ZERO_ADDRESS =
 
 const GECKO_API =
     "https://api.geckoterminal.com/api/v2"
+
+// v2.4.3 cleanup: historical DCA audit output is intentionally silent in normal builds.
+// Keep the diagnostic call sites/data paths intact so they can be re-enabled during debugging
+// without changing scanner behaviour.
+const dcaDiagnostic = () => {}
 
 /*
  * PulseChain launched from the Ethereum state taken around
@@ -90,7 +96,7 @@ const priceMemoryCache = new Map()
 const poolMemoryCache = new Map()
 // Increment this whenever the transaction-detection logic changes.
 // Doing so automatically ignores results produced by an older parser.
-const DCA_TRANSACTION_CACHE_VERSION = 15 // v76: reuse proven v74 per-transaction results; only new PLS union hashes are fetched
+const DCA_TRANSACTION_CACHE_VERSION = 16 // v161: parity reset; discard stale browser/Electron transaction classifications once
 
 const getTransactionCacheKey = ({
     network,
@@ -185,13 +191,41 @@ const safeLocalStorageGet = key => {
 const safeLocalStorageSet = (key, value) => {
     try {
         localStorage.setItem(key, value)
+        return true
     } catch {
         // DCA still works without persistent caching.
+        return false
     }
 }
-const DCA_RESULT_CACHE_VERSION = 9 // v157: do not migrate pre-hourly combined DCA pricing into the new wallet cache
 
-const DCA_WALLET_CACHE_VERSION = 10 // v157: rebuild once so historical purchase basis uses hourly pricing
+// v2.4.3: Browser localStorage can be much smaller than Electron's persistent store.
+// A large multi-wallet scan can fill it with per-transaction evidence before the
+// critical per-wallet ledger/checkpoint is written. If that happens, discard the
+// rebuildable transaction-result cache and retry the wallet checkpoint write.
+const writeCriticalDcaStorage = (key, value) => {
+    if (safeLocalStorageSet(key, value)) return true
+
+    try {
+        const transactionPrefix = `hex_dca_transaction_v${DCA_TRANSACTION_CACHE_VERSION}:`
+        const keysToRemove = []
+        for (let i = 0; i < localStorage.length; i += 1) {
+            const storageKey = localStorage.key(i)
+            if (storageKey?.startsWith(transactionPrefix)) keysToRemove.push(storageKey)
+        }
+        keysToRemove.forEach(storageKey => localStorage.removeItem(storageKey))
+        console.warn(`[HEX DCA v2.4.3] localStorage quota recovery removed ${keysToRemove.length} rebuildable transaction cache entries`)
+        return safeLocalStorageSet(key, value)
+    } catch (error) {
+        console.warn('[HEX DCA v2.4.3] unable to persist critical DCA wallet checkpoint', error)
+        return false
+    }
+}
+const DCA_RESULT_CACHE_VERSION = 14 // v195: rebuild with asymmetric PulseChain snapshot union
+
+// v158: rebuild once so browser and Electron start from the same verified ledger.
+// v157-era browser caches could permanently checkpoint a transiently incomplete
+// PulseChain scan (for example 35 purchases while Electron had 36).
+const DCA_WALLET_CACHE_VERSION = 18 // v195: rebuild with asymmetric PulseChain snapshot union
 const getDcaWalletCacheKey = wallet => `hex_dca_wallet_v${DCA_WALLET_CACHE_VERSION}:${normalizeAddress(wallet)}`
 const readDcaWalletCache = wallet => {
     try {
@@ -207,7 +241,7 @@ const writeDcaWalletCache = (wallet, purchases, walletErrors = {}, transactionEr
     // persisted exactly like a successful zero-purchase wallet, which could
     // make a packaged restart show DCA/P&L as N/A until the cache expired.
     const payload = { purchases, walletErrors, transactionErrors, complete: complete === true, scanCheckpoints, cachedAt: Date.now() }
-    safeLocalStorageSet(getDcaWalletCacheKey(wallet), JSON.stringify(payload))
+    writeCriticalDcaStorage(getDcaWalletCacheKey(wallet), JSON.stringify(payload))
     return payload
 }
 
@@ -353,6 +387,41 @@ const v134RunPriceRequest = async task => {
     return result
 }
 
+// Web build: use Electron's IPC fetch bridge when available, otherwise use
+// the browser's native fetch. Keeping the same { ok, status, data, error }
+// shape means the DCA pricing pipeline is identical in both environments.
+const fetchJsonUniversal = async url => {
+    if (window?.electron?.fetchJson) {
+        return window.electron.fetchJson(url)
+    }
+
+    try {
+        const response = await fetch(url, {
+            method: "GET",
+            headers: { Accept: "application/json" }
+        })
+        let data = null
+        try {
+            data = await response.json()
+        } catch {
+            // Preserve the same failure shape as the Electron bridge.
+        }
+        return {
+            ok: response.ok,
+            status: response.status,
+            data,
+            error: response.ok ? null : `HTTP ${response.status}`
+        }
+    } catch (error) {
+        return {
+            ok: false,
+            status: 0,
+            data: null,
+            error: error?.message ?? "Browser fetch failed"
+        }
+    }
+}
+
 const fetchJsonWithRetry = async (
     url,
     {
@@ -369,15 +438,9 @@ const fetchJsonWithRetry = async (
         attempt += 1
     ) {
         try {
-            if (!window?.electron?.fetchJson) {
-                throw new Error(
-                    "Electron JSON fetch bridge is unavailable"
-                )
-            }
-
             let sharedRequest = v134InFlightPriceRequests.get(url)
             if (!sharedRequest) {
-                sharedRequest = v134RunPriceRequest(() => window.electron.fetchJson(url))
+                sharedRequest = v134RunPriceRequest(() => fetchJsonUniversal(url))
                 v134InFlightPriceRequests.set(url, sharedRequest)
                 sharedRequest.finally(() => {
                     if (v134InFlightPriceRequests.get(url) === sharedRequest) {
@@ -551,7 +614,7 @@ const fetchHistoricalEthPrice = async timestamp => {
     const cacheKey = `eth:hour:${roundedTimestamp}`
     if (priceMemoryCache.has(cacheKey)) return priceMemoryCache.get(cacheKey)
 
-    const storageKey = `hex_dca_price_${cacheKey}`
+    const storageKey = `hex_dca_price_web2_${cacheKey}`
     const storedPrice = Number(safeLocalStorageGet(storageKey))
     if (Number.isFinite(storedPrice) && storedPrice > 0) {
         priceMemoryCache.set(cacheKey, storedPrice)
@@ -601,7 +664,7 @@ const fetchHistoricalLlamaPrice = async (
         return priceMemoryCache.get(cacheKey)
     }
 
-    const storageKey = `hex_dca_price_${cacheKey}`
+    const storageKey = `hex_dca_price_web2_${cacheKey}`
     const storedPrice = Number(safeLocalStorageGet(storageKey))
     if (Number.isFinite(storedPrice) && storedPrice > 0) {
         priceMemoryCache.set(cacheKey, storedPrice)
@@ -612,7 +675,7 @@ const fetchHistoricalLlamaPrice = async (
         const url =
             `https://coins.llama.fi/prices/historical/${roundedTimestamp}/` +
             encodeURIComponent(coinKey)
-        const result = await window.electron.fetchJson(url)
+        const result = await fetchJsonUniversal(url)
         if (!result?.ok) return null
 
         const coin = result?.data?.coins?.[coinKey]
@@ -694,7 +757,7 @@ if (Number.isFinite(llamaPrice) && llamaPrice > 0) {
         return priceMemoryCache.get(cacheKey)
     }
 
-    const storageKey = `hex_dca_price_${cacheKey}`
+    const storageKey = `hex_dca_price_web2_${cacheKey}`
     const storedPrice = Number(safeLocalStorageGet(storageKey))
 
     if (Number.isFinite(storedPrice) && storedPrice > 0) {
@@ -1030,6 +1093,68 @@ const isPossibleHexPurchase = (
 }
 
 
+// v178 diagnostic-only: record the exact per-transaction classification outcome.
+// This is intentionally global to the hook module so extractRpcHexPurchase can annotate
+// the same candidate that the worker later sees. It does not alter classification/math.
+const v178CandidateFates = new Map()
+const v178FateKey = (network, wallet, hash) => `${String(network ?? "").toLowerCase().includes("eth") ? "ethereum" : "pulsechain"}:${normalizeAddress(wallet)}:${String(hash ?? "").toLowerCase()}`
+
+// v180: focus diagnostics on the three PulseChain transactions that differed
+// between Web and Electron in v178. Keep normal DCA behavior unchanged.
+const V180_TRACE_HASHES = new Set([
+    // v207: V206 isolated the remaining parity mismatch to these two transactions.
+    // f3b19... exists in both ledgers but classifies as 450k HEX in Electron vs
+    // 500k in Web. a8c6... is accepted only by Electron. Capture their raw
+    // receipt-transfer inputs so the next patch can fix the source divergence.
+    "0xf3b19d04a0e6c7a2a91a523eb70464e06a2136eb317dcfb91f64fc0401cbf6b5",
+    "0xa8c6fa67b6c40fd6683f6728ef44b2f6dc41fce7de7b39e200a72e077fdf32fd"
+])
+const v180IsTraceHash = hash => V180_TRACE_HASHES.has(String(hash ?? "").toLowerCase())
+
+// v208 deterministic classifier input: keep a monotonic, per-transaction union of
+// every receipt/log snapshot observed during this scan. V207 proved that the same
+// hash can reach the classifier once with a complete transfer list and later with
+// an empty/partial list (or vice versa). Classification must never depend on which
+// asynchronous response happened to arrive last.
+const v208CanonicalTransferEvidence = new Map()
+const v208TransferKey = transfer => [
+    normalizeAddress(transfer?.tokenAddress),
+    normalizeAddress(transfer?.from),
+    normalizeAddress(transfer?.to),
+    String(transfer?.value?.toString?.() ?? transfer?.value ?? "0")
+].join(":")
+const v208EvidenceKey = (network, wallet, hash) => [
+    String(network ?? "").toLowerCase().includes("eth") ? "ethereum" : "pulsechain",
+    normalizeAddress(wallet),
+    String(hash ?? "").toLowerCase()
+].join(":")
+const v208MergeCanonicalTransfers = (network, wallet, hash, ...snapshots) => {
+    const key = v208EvidenceKey(network, wallet, hash)
+    const previous = v208CanonicalTransferEvidence.get(key) ?? []
+    const merged = []
+    const seen = new Set()
+    ;[previous, ...snapshots].forEach(snapshot => {
+        if (!Array.isArray(snapshot)) return
+        snapshot.forEach(transfer => {
+            if (!transfer) return
+            const transferKey = v208TransferKey(transfer)
+            if (!seen.has(transferKey)) {
+                seen.add(transferKey)
+                merged.push(transfer)
+            }
+        })
+    })
+    // Monotonic only: an empty or shorter response can add nothing, but can never
+    // erase transfer legs already observed for this transaction.
+    v208CanonicalTransferEvidence.set(key, merged)
+    return merged
+}
+const v178RecordFate = (network, wallet, hash, fate, extra = {}) => {
+    const key = v178FateKey(network, wallet, hash)
+    const previous = v178CandidateFates.get(key) ?? {}
+    v178CandidateFates.set(key, { ...previous, network: key.split(":")[0], wallet: normalizeAddress(wallet), hash: String(hash ?? "").toLowerCase(), fate, ...extra })
+}
+
 const ethDcaRejectAudit = {
     emptyReceipt: 0, excluded: 0, missingMetadata: 0, belowMinBlock: 0, aboveMaxBlock: 0,
     noIncomingHex: 0, noPaymentLeg: 0, invalidHexAmount: 0, accepted: 0,
@@ -1079,6 +1204,41 @@ const extractRpcHexPurchase = async ({
 }) => {
     const source = getDcaSource(network)
 
+    // v208: hydrate the classifier from the strongest transfer evidence seen for
+    // this exact network/wallet/hash. This makes repeated calls idempotent even if
+    // an RPC/explorer response is transiently empty or truncated.
+    rpcTransfers = v208MergeCanonicalTransfers(
+        network, walletAddress, activity?.hash, rpcTransfers
+    )
+
+    // v204 diagnostic-only: for the three transactions that actually diverged in
+    // V203, capture the raw classifier inputs before any rejection/acceptance.
+    // This does not alter discovery, classification, pricing, cache, or DCA math.
+    if (v180IsTraceHash(activity?.hash)) {
+        const traceTransfers = Array.isArray(rpcTransfers) ? rpcTransfers.map((transfer, index) => ({
+            index,
+            tokenAddress: normalizeAddress(transfer?.tokenAddress),
+            from: normalizeAddress(transfer?.from),
+            to: normalizeAddress(transfer?.to),
+            value: transfer?.value?.toString?.() ?? String(transfer?.value ?? ""),
+            logIndex: transfer?.logIndex ?? transfer?.log_index ?? null
+        })) : []
+        dcaDiagnostic(`[HEX DCA V209 ${typeof window !== "undefined" && window?.electronAPI ? "ELECTRON" : "WEB"}] RAW CLASSIFIER INPUT ${String(activity?.hash ?? "").toLowerCase()}`)
+        dcaDiagnostic("activity", {
+            hash: String(activity?.hash ?? "").toLowerCase(),
+            block: rpcBlockNumber ?? activity?.blockNumber ?? activity?.block ?? null,
+            timestamp: rpcTimestamp ?? activity?.timestamp ?? activity?.timeStamp ?? null,
+            from: normalizeAddress(activity?.from),
+            to: normalizeAddress(activity?.to),
+            value: String(activity?.value ?? "0"),
+            method: activity?.method ?? null,
+            network
+        })
+        dcaDiagnostic(`receipt transfers (${traceTransfers.length})`, traceTransfers)
+        dcaDiagnostic(`[HEX DCA V209 COPY INPUT] ${String(activity?.hash ?? "").toLowerCase()} | block=${rpcBlockNumber ?? "?"} | value=${String(activity?.value ?? "0")} | transfers=${JSON.stringify(traceTransfers)}`)
+        dcaDiagnostic()
+    }
+
     if (!Array.isArray(rpcTransfers) || rpcTransfers.length === 0) {
         if (network === "ethereum") {
             ethDcaRejectAudit.emptyReceipt += 1
@@ -1098,6 +1258,7 @@ const extractRpcHexPurchase = async ({
             pulseDcaRejectAudit.emptyReceipt += 1
             recordPulseReject("emptyReceipt", activity, { transferCount: 0 })
         }
+        v178RecordFate(network, walletAddress, activity?.hash, "empty-receipt")
         return null
     }
     if (isExcludedTransaction(activity)) {
@@ -1106,6 +1267,7 @@ const extractRpcHexPurchase = async ({
             pulseDcaRejectAudit.excluded += 1
             recordPulseReject("excluded", activity, { transferCount: rpcTransfers.length })
         }
+        v178RecordFate(network, walletAddress, activity?.hash, "excluded-transaction")
         return null
     }
 
@@ -1118,6 +1280,7 @@ const extractRpcHexPurchase = async ({
             pulseDcaRejectAudit.missingMetadata += 1
             recordPulseReject("missingMetadata", activity, { block: rpcBlockNumber, hasTimestamp: Boolean(rpcTimestamp), transferCount: rpcTransfers.length })
         }
+        v178RecordFate(network, walletAddress, activity?.hash, "missing-metadata", { block: rpcBlockNumber ?? null, timestamp: rpcTimestamp ?? null })
         throw new Error(
             `${source.label} RPC transaction metadata was unavailable.`
         )
@@ -1140,6 +1303,7 @@ const extractRpcHexPurchase = async ({
         numericBlockNumber < source.minimumBlock
     ) {
         if (network === "ethereum") ethDcaRejectAudit.belowMinBlock += 1
+        v178RecordFate(network, walletAddress, activity?.hash, "below-min-block", { block: numericBlockNumber })
         return null
     }
 
@@ -1152,6 +1316,7 @@ const extractRpcHexPurchase = async ({
             pulseDcaRejectAudit.aboveMaxBlock += 1
             recordPulseReject("aboveMaxBlock", activity, { block: numericBlockNumber, maximumBlock: source?.maximumBlock, transferCount: rpcTransfers.length })
         }
+        v178RecordFate(network, walletAddress, activity?.hash, "above-max-block", { block: numericBlockNumber })
         return null
     }
     const normalizedWallet =
@@ -1172,6 +1337,7 @@ const extractRpcHexPurchase = async ({
             pulseDcaRejectAudit.noIncomingHex += 1
             recordPulseReject("noIncomingHex", activity, { block: numericBlockNumber, transferCount: rpcTransfers.length })
         }
+        v178RecordFate(network, walletAddress, activity?.hash, "no-incoming-hex", { receiptTransfers: rpcTransfers.length, incomingHexTransfers: 0, outgoingPaymentTransfers: 0, nativeSpent: 0 })
         return null
     }
 
@@ -1205,6 +1371,7 @@ const extractRpcHexPurchase = async ({
             })
             recordPulseReject("noPaymentLeg", activity, { block: numericBlockNumber, purchasedHex: rejectedHex, transferCount: rpcTransfers.length, outgoingPaymentTransfers: 0 })
         }
+        v178RecordFate(network, walletAddress, activity?.hash, "no-payment-leg", { receiptTransfers: rpcTransfers.length, incomingHexTransfers: incomingHexTransfers.length, outgoingPaymentTransfers: outgoingPaymentTransfers.length, nativeSpent: nativePlsSpent })
         return null
     }
 
@@ -1235,6 +1402,7 @@ const extractRpcHexPurchase = async ({
             pulseDcaRejectAudit.invalidHexAmount += 1
             recordPulseReject("invalidHexAmount", activity, { block: numericBlockNumber, purchasedHex, transferCount: rpcTransfers.length })
         }
+        v178RecordFate(network, walletAddress, activity?.hash, "invalid-hex-amount", { purchasedHex })
         return null
     }
 
@@ -1294,6 +1462,7 @@ const extractRpcHexPurchase = async ({
                 outgoingPaymentTransfers: outgoingPaymentTransfers.length
             })
         }
+        v178RecordFate(network, walletAddress, activity?.hash, "liquidity-redemption", { purchasedHex })
         return null
     }
 
@@ -1354,6 +1523,7 @@ const extractRpcHexPurchase = async ({
 
     if (network === "ethereum") ethDcaRejectAudit.accepted += 1
     if (network === "pulsechain" || network === "mainnet") pulseDcaRejectAudit.accepted += 1
+    v178RecordFate(network, walletAddress, activity?.hash, "accepted", { receiptTransfers: rpcTransfers.length, incomingHexTransfers: incomingHexTransfers.length, outgoingPaymentTransfers: outgoingPaymentTransfers.length, nativeSpent: nativePlsSpent, purchasedHex, usdSpent })
 
     return {
         network,
@@ -1539,24 +1709,48 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                 }
                 const transferTopic = ethers.utils.id("Transfer(address,address,uint256)")
                 const toTopic = ethers.utils.hexZeroPad(normalizeAddress(wallet), 32)
-                const rows = []
-                const seen = new Set()
-                // Small chunks keep public RPCs happy while still making normal app-to-app
-                // checks only one or two requests. This path is never used for lifetime scans.
-                const chunkSize = source.network === "ethereum" ? 25000 : 50000
+                const rowsByHash = new Map()
+                // V228: keep the proven V226 bidirectional HEX-log discovery only; downstream verification uses the original stable FIFO scheduling. Build the exact same non-overlapping
+                // block chunks as V225, but let two conservative workers claim chunks from
+                // opposite ends of history. This tests the "meet in the middle" idea without
+                // increasing the request fan-out beyond two simultaneous getLogs calls.
+                // Ethereum remains single-direction/single-worker to preserve its locked path.
+                const chunkSize = source.network === "ethereum" ? 25000 : 100000
+                const chunks = []
                 for (let fromBlock = startBlock; fromBlock <= endBlock; fromBlock += chunkSize) {
-                    const toBlock = Math.min(endBlock, fromBlock + chunkSize - 1)
-                    const logs = await provider.getLogs({
-                        address: HEX_ADDRESS,
-                        fromBlock,
-                        toBlock,
-                        topics: [transferTopic, null, toTopic]
-                    })
+                    chunks.push({ fromBlock, toBlock: Math.min(endBlock, fromBlock + chunkSize - 1) })
+                }
+
+                let lowChunkIndex = 0
+                let highChunkIndex = chunks.length - 1
+                const claimChunk = direction => {
+                    if (lowChunkIndex > highChunkIndex) return null
+                    if (direction === "backward") return chunks[highChunkIndex--]
+                    return chunks[lowChunkIndex++]
+                }
+
+                const scanChunk = async ({ fromBlock, toBlock }) => {
+                    let logs = null
+                    let lastError = null
+                    for (let attempt = 1; attempt <= 4; attempt += 1) {
+                        try {
+                            logs = await provider.getLogs({
+                                address: HEX_ADDRESS,
+                                fromBlock,
+                                toBlock,
+                                topics: [transferTopic, null, toTopic]
+                            })
+                            break
+                        } catch (error) {
+                            lastError = error
+                            if (attempt < 4) await new Promise(resolve => setTimeout(resolve, 350 * attempt))
+                        }
+                    }
+                    if (!logs) throw lastError ?? new Error(`Unable to read HEX logs ${fromBlock}-${toBlock}`)
                     for (const log of logs) {
                         const hash = String(log?.transactionHash ?? "").toLowerCase()
-                        if (!hash || seen.has(hash)) continue
-                        seen.add(hash)
-                        rows.push({
+                        if (!hash || rowsByHash.has(hash)) continue
+                        rowsByHash.set(hash, {
                             hash,
                             block: Number(log?.blockNumber ?? 0),
                             method: "",
@@ -1568,7 +1762,26 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                         })
                     }
                 }
-                return rows
+
+                const scanDirection = async direction => {
+                    while (!cancelled) {
+                        const chunk = claimChunk(direction)
+                        if (!chunk) return
+                        await scanChunk(chunk)
+                    }
+                }
+
+                if (source.key === "pulsechain" && chunks.length > 1) {
+                    await Promise.all([scanDirection("forward"), scanDirection("backward")])
+                } else {
+                    await scanDirection("forward")
+                }
+
+                // Completion order is intentionally irrelevant. Return a deterministic order so
+                // downstream classification receives the same candidate sequence in both apps.
+                return [...rowsByHash.values()].sort((a, b) =>
+                    Number(a?.block ?? 0) - Number(b?.block ?? 0) || String(a?.hash ?? "").localeCompare(String(b?.hash ?? ""))
+                )
             }
 
             const getIncrementalStartBlock = (wallet, source) => {
@@ -1603,6 +1816,19 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
             try {
     const candidates = []
     const combinedWalletErrors = {}
+    // v177 diagnostic-only instrumentation. Do not alter discovery/classification.
+    // Capture exactly what each runtime receives at every boundary so fluctuating
+    // Web/Electron results can be localized to discovery vs verification.
+    const v177ScanStartedAt = Date.now()
+    // v215 diagnostics: timestamp the major pre-canonical boundaries without
+    // changing discovery, classification, retry, or DCA behavior.
+    let v215DiscoveryEndAt = null
+    let v215InitialVerificationEndAt = null
+    const v177Discovery = []
+    // v188: this value is used by the PulseChain discovery diagnostics below.
+    // Define it before the parallel discovery pass to avoid the temporal-dead-zone
+    // failure that caused V187 to discard otherwise successful incoming-index rows.
+    const v177Environment = (typeof navigator !== "undefined" && /electron/i.test(navigator.userAgent || "")) ? "ELECTRON" : "WEB"
 
     // v120: discover Ethereum and PulseChain history concurrently. They use
     // independent explorers/RPCs, so there is no reason to wait for Ethereum
@@ -1653,32 +1879,62 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                             activities[normalizedWallet] = await fetchIncrementalIncomingHexLogs(normalizedWallet, source, startBlock, endBlock)
                             continue
                         }
-                        activities[normalizedWallet] = await fetchIncomingTokenTransferTransactions(
-                            normalizedWallet,
-                            HEX_ADDRESS,
-                            source.network,
-                            settings,
-                            {
-                                maxPages: 100,
-                                delayBetweenPages: 450,
-                                retryAttempts: 2,
-                                startBlock: getIncrementalStartBlock(normalizedWallet, source),
-                                endBlock: sourceHeads[source.key] ?? source.maximumBlock ?? Number.MAX_SAFE_INTEGER,
-                                onProgress: progress => {
-                                    setProgress(previous => ({
-                                        ...previous,
-                                        stage: "history",
-                                        historyProgress: {
-                                            ...(previous?.historyProgress ?? {}),
-                                            [source.network]: {
-                                                current: Number(progress.page ?? 0),
-                                                collected: Number(progress.collected ?? 0)
+                        // v171: cold Ethereum discovery must be deterministic. Recent clean
+                        // browser/Electron runs showed different Ethereum candidate totals even
+                        // though the accepted Ethereum ledger had historically converged to the
+                        // same 28 purchases. That means the Blockscout token-transfer index can
+                        // transiently omit rows between requests. Run a small convergence loop and
+                        // UNION hashes across passes instead of trusting a single snapshot. Stop as
+                        // soon as a pass adds nothing; cap at three passes so a flaky explorer can
+                        // never turn this into an unbounded scan.
+                        const ethereumDiscoveryByHash = new Map()
+                        let previousEthereumDiscoveryCount = -1
+                        const ethereumDiscoveryStartedAt = Date.now()
+                        for (let discoveryPass = 1; discoveryPass <= 3; discoveryPass += 1) {
+                            const passRows = await fetchIncomingTokenTransferTransactions(
+                                normalizedWallet,
+                                HEX_ADDRESS,
+                                source.network,
+                                settings,
+                                {
+                                    maxPages: 100,
+                                    delayBetweenPages: 550,
+                                    retryAttempts: 5,
+                                    startBlock: getIncrementalStartBlock(normalizedWallet, source),
+                                    endBlock: sourceHeads[source.key] ?? source.maximumBlock ?? Number.MAX_SAFE_INTEGER,
+                                    onProgress: progress => {
+                                        setProgress(previous => ({
+                                            ...previous,
+                                            stage: "history",
+                                            historyProgress: {
+                                                ...(previous?.historyProgress ?? {}),
+                                                [source.network]: {
+                                                    current: Number(progress.page ?? 0),
+                                                    collected: Math.max(
+                                                        ethereumDiscoveryByHash.size,
+                                                        Number(progress.collected ?? 0)
+                                                    )
+                                                }
                                             }
-                                        }
-                                    }))
+                                        }))
+                                    }
                                 }
+                            )
+                            for (const row of passRows) {
+                                const hash = String(row?.hash ?? "").toLowerCase()
+                                if (hash && !ethereumDiscoveryByHash.has(hash)) ethereumDiscoveryByHash.set(hash, row)
                             }
-                        )
+                            const currentCount = ethereumDiscoveryByHash.size
+                            const added = previousEthereumDiscoveryCount < 0
+                                ? currentCount
+                                : currentCount - previousEthereumDiscoveryCount
+                            dcaDiagnostic(`[HEX DCA V171] Ethereum discovery pass ${discoveryPass} ${normalizedWallet}: ${currentCount} unique hashes (${added >= 0 ? `+${added}` : added})`)
+                            if (previousEthereumDiscoveryCount === currentCount) break
+                            previousEthereumDiscoveryCount = currentCount
+                            if (discoveryPass < 3) await new Promise(resolve => setTimeout(resolve, 700))
+                        }
+                        activities[normalizedWallet] = [...ethereumDiscoveryByHash.values()]
+                        dcaDiagnostic(`[HEX DCA V171] Ethereum discovery converged ${normalizedWallet}: ${activities[normalizedWallet].length} hashes in ${((Date.now() - ethereumDiscoveryStartedAt) / 1000).toFixed(1)}s`)
 
                     } catch (error) {
                         activities[normalizedWallet] = []
@@ -1702,7 +1958,53 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                     if (Number.isFinite(endBlock) && startBlock > endBlock) { activities[normalizedWallet] = []; continue }
                     const merged = new Map()
                     let successfulDiscoverySources = 0
+                const failedDiscoverySources = []
                     const hasCheckpoint = Number(cachedWallets[normalizedWallet]?.scanCheckpoints?.[source.key]) > 0
+
+                    // v199: on a cold PulseChain scan, start a direct HEX Transfer-log scan
+                    // immediately and let it run in parallel with the explorer indexes below.
+                    // Explorer pagination has repeatedly returned complete-looking but different
+                    // subsets (61-65 purchases). Contract logs are the deterministic discovery
+                    // floor: they tell us every tx in which this wallet received HEX. The normal
+                    // classifier still decides whether each tx was a purchase, transfer, LP
+                    // redemption, etc. Ethereum is intentionally unchanged here.
+                    const v199PulseRpcDiscoveryPromise = (!hasCheckpoint && source.key === "pulsechain")
+                        ? fetchIncrementalIncomingHexLogs(
+                            normalizedWallet,
+                            source,
+                            Number(source.minimumBlock ?? PULSECHAIN_FIRST_BLOCK),
+                            endBlock
+                        ).catch(error => {
+                            console.warn(`[HEX DCA V200 ${v177Environment}] Pulse RPC discovery failed; falling back to explorer union`, {
+                                wallet: normalizedWallet,
+                                message: error?.message ?? String(error)
+                            })
+                            return null
+                        })
+                        : null
+
+                    // v200: the direct HEX Transfer log is now the authoritative cold-scan
+                    // discovery source. Every real acquisition that leaves HEX in this wallet
+                    // must emit an incoming HEX Transfer event, including router swaps. The
+                    // explorer/activity union was useful as a diagnostic, but its pagination is
+                    // demonstrably nondeterministic between Electron and the browser and was
+                    // changing the classifier input from run to run. Do not union explorer-only
+                    // hashes into a successful RPC scan. If RPC fails completely, fall through
+                    // to the existing explorer path as a resilience fallback.
+                    if (v199PulseRpcDiscoveryPromise) {
+                        const authoritativeRpcRows = await v199PulseRpcDiscoveryPromise
+                        if (Array.isArray(authoritativeRpcRows)) {
+                            const rpcHashes = authoritativeRpcRows
+                                .map(row => String(row?.hash ?? "").toLowerCase())
+                                .filter(Boolean)
+                                .sort()
+                            activities[normalizedWallet] = authoritativeRpcRows
+                            dcaDiagnostic(`[HEX DCA V200 ${v177Environment}] AUTHORITATIVE RPC DISCOVERY ${normalizedWallet}: ${rpcHashes.length} candidate hashes`)
+                            dcaDiagnostic(`[HEX DCA V200 ${v177Environment}] AUTHORITATIVE RPC HASHES ${normalizedWallet}`, rpcHashes)
+                            continue
+                        }
+                    }
+
                     if (hasCheckpoint) {
                         try {
                             const incrementalRows = await fetchIncrementalIncomingHexLogs(normalizedWallet, source, startBlock, endBlock)
@@ -1742,11 +2044,55 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                             }
                         )
                         successfulDiscoverySources += 1
-                        incomingHex.forEach(row => {
+                        // v187 parity: Blockscout's address/token index has proven to return
+                        // different complete-looking subsets to Electron and Web. One response
+                        // is therefore not authoritative. Union three snapshots of this narrow
+                        // HEX-only incoming index before candidate classification.
+                        const incomingHexUnion = new Map()
+                        const addIncomingSnapshot = rows => (rows ?? []).forEach(row => {
                             const hash = String(row?.hash ?? "").toLowerCase()
-                            if (hash && !merged.has(hash)) merged.set(hash, row)
+                            if (hash && !incomingHexUnion.has(hash)) incomingHexUnion.set(hash, row)
                         })
+                        addIncomingSnapshot(incomingHex)
+                        // v191: three fixed snapshots still produced different complete-looking
+                        // candidate sets in Web and Electron (37 vs 36). Converge the *narrow*
+                        // incoming-HEX index instead: continue only while new hashes are appearing,
+                        // and require two quiet passes before trusting the union. This spends extra
+                        // requests only when the explorer is actually fluctuating.
+                        // v197: roll discovery back to V191's bounded convergence rule. V191 was the
+                        // last test that reached 64/64 Electron/Web. The later fixed 8/16-snapshot
+                        // unions increased runtime and actually widened parity (V196: 65/62). Stop
+                        // after two quiet snapshots, with six passes maximum.
+                        let v191IncomingQuietPasses = 0
+                        for (let v191Pass = 2; v191Pass <= 6 && v191IncomingQuietPasses < 2; v191Pass += 1) {
+                            try {
+                                await new Promise(resolve => setTimeout(resolve, 450))
+                                const before = incomingHexUnion.size
+                                const extraIncoming = await fetchIncomingTokenTransferTransactions(
+                                    normalizedWallet, HEX_ADDRESS, source.network, settings,
+                                    {
+                                        maxPages: 100,
+                                        delayBetweenPages: 225,
+                                        retryAttempts: 3,
+                                        startBlock: getIncrementalStartBlock(normalizedWallet, source),
+                                        endBlock: sourceHeads[source.key] ?? source.maximumBlock ?? Number.MAX_SAFE_INTEGER
+                                    }
+                                )
+                                addIncomingSnapshot(extraIncoming)
+                                const added = incomingHexUnion.size - before
+                                v191IncomingQuietPasses = added === 0 ? v191IncomingQuietPasses + 1 : 0
+                                dcaDiagnostic(`[HEX DCA V197 ${v177Environment}] incoming convergence pass ${v191Pass} ${normalizedWallet}: ${incomingHexUnion.size} hashes (+${added}), quiet=${v191IncomingQuietPasses}`)
+                            } catch { /* retain the union from successful snapshots */ }
+                        }
+                        const canonicalIncomingHex = [...incomingHexUnion.values()]
+                        canonicalIncomingHex.forEach(row => {
+                            const hash = String(row?.hash ?? "").toLowerCase()
+                            if (hash && !merged.has(hash)) merged.set(hash, { ...row, dca_discovery_source: row?.dca_discovery_source ?? "pulsechain-incoming-index-v187" })
+                        })
+                        v177Discovery.push({ network: "pulsechain", wallet: normalizedWallet, source: "incoming-index-v187-union", count: canonicalIncomingHex.length, hashes: canonicalIncomingHex.map(row => String(row?.hash ?? "").toLowerCase()).filter(Boolean) })
+                        dcaDiagnostic(`[HEX DCA V187 ${v177Environment}] incoming HEX union ${normalizedWallet}: ${canonicalIncomingHex.length} hashes`)
                     } catch (error) {
+                        failedDiscoverySources.push("incoming-index")
                         console.warn("HEX DCA PulseChain incoming index failed", {
                             wallet: normalizedWallet,
                             message: error?.message ?? String(error)
@@ -1782,8 +2128,50 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                             }
                         )
                         successfulDiscoverySources += 1
+                        // v187: apply the same snapshot-union rule to the legacy HEX-specific
+                        // transfer index. This is the source that exposed the 9d79/3b04/a8c6
+                        // parity misses in earlier traces.
+                        const legacyUnion = new Map()
+                        const addLegacySnapshot = rows => (rows ?? []).forEach(row => {
+                            const hash = String(row?.transaction_hash ?? row?.hash ?? "").toLowerCase()
+                            const to = normalizeAddress(row?.to)
+                            const key = `${hash}:${to}:${String(row?.value ?? row?.total?.value ?? "")}`
+                            if (hash && !legacyUnion.has(key)) legacyUnion.set(key, row)
+                        })
+                        addLegacySnapshot(legacyHexTransfers)
+                        // v191: use the same convergence rule for the legacy HEX index. Earlier
+                        // traces showed that this source can expose a purchase that the v2 index
+                        // omits, so neither source is allowed to win from one lucky snapshot.
+                        // v197: restore V191's bounded convergence here too. Extra fixed snapshots
+                        // were adding minutes without making the final candidate set deterministic.
+                        let v191LegacyQuietPasses = 0
+                        for (let v191Pass = 2; v191Pass <= 6 && v191LegacyQuietPasses < 2; v191Pass += 1) {
+                            try {
+                                await new Promise(resolve => setTimeout(resolve, 450))
+                                const before = legacyUnion.size
+                                const extraLegacy = await fetchCompleteAddressTokenTransfers(
+                                    normalizedWallet, source.network, settings,
+                                    {
+                                        maxPages: 120,
+                                        pageSize: 250,
+                                        delayBetweenPages: 175,
+                                        retryAttempts: 5,
+                                        startBlock: getIncrementalStartBlock(normalizedWallet, source),
+                                        endBlock: sourceHeads[source.key] ?? source.maximumBlock ?? 99999999,
+                                        tokenAddress: HEX_ADDRESS
+                                    }
+                                )
+                                addLegacySnapshot(extraLegacy)
+                                const added = legacyUnion.size - before
+                                v191LegacyQuietPasses = added === 0 ? v191LegacyQuietPasses + 1 : 0
+                                dcaDiagnostic(`[HEX DCA V197 ${v177Environment}] legacy convergence pass ${v191Pass} ${normalizedWallet}: ${legacyUnion.size} rows (+${added}), quiet=${v191LegacyQuietPasses}`)
+                            } catch { /* retain successful snapshots */ }
+                        }
+                        const canonicalLegacyHexTransfers = [...legacyUnion.values()]
+                        v177Discovery.push({ network: "pulsechain", wallet: normalizedWallet, source: "legacy-index-v187-union", count: canonicalLegacyHexTransfers.length, hashes: canonicalLegacyHexTransfers.map(row => String(row?.transaction_hash ?? row?.hash ?? "").toLowerCase()).filter(Boolean) })
+                        dcaDiagnostic(`[HEX DCA V187 ${v177Environment}] legacy HEX union ${normalizedWallet}: ${canonicalLegacyHexTransfers.length} rows`)
                         let added = 0
-                        legacyHexTransfers
+                        canonicalLegacyHexTransfers
                             .filter(row => normalizeAddress(row?.to) === normalizedWallet)
                             .forEach(row => {
                                 const hash = String(row?.transaction_hash ?? row?.hash ?? "").toLowerCase()
@@ -1800,11 +2188,18 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                                 added += 1
                             })
                     } catch (error) {
+                        failedDiscoverySources.push("legacy-index")
                         console.warn("HEX DCA PulseChain legacy index failed", {
                             wallet: normalizedWallet,
                             message: error?.message ?? String(error)
                         })
                     }
+
+                    // v176: removed the unconditional second HEX-index discovery pass.
+                    // v175 repeated both paginated indexes for every wallet and added minutes
+                    // without producing deterministic browser/Electron ledgers. The primary
+                    // incoming + legacy union above remains authoritative; failed sources leave
+                    // the checkpoint open so the next run can repair transient omissions.
 
                     // v109 PulseChain-only recovery: add the known-good v106 wallet-activity
                     // discovery as a THIRD source, but only after the two HEX-specific indexes.
@@ -1836,6 +2231,7 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                             }
                         ) : { activities: { [normalizedWallet]: [] }, errors: {} }
                         const activityRows = activitySupplement?.activities?.[normalizedWallet] ?? []
+                        v177Discovery.push({ network: "pulsechain", wallet: normalizedWallet, source: "activity-supplement", count: activityRows.length, hashes: activityRows.map(row => String(row?.hash ?? row?.transaction_hash ?? "").toLowerCase()).filter(Boolean) })
                         let activityAdded = 0
                         activityRows.forEach(row => {
                             const hash = String(row?.hash ?? row?.transaction_hash ?? "").toLowerCase()
@@ -1845,15 +2241,51 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                         })
                         successfulDiscoverySources += 1
                     } catch (error) {
+                        failedDiscoverySources.push("activity-supplement")
                         console.warn("HEX DCA PulseChain activity supplement failed", {
                             wallet: normalizedWallet,
                             message: error?.message ?? String(error)
                         })
                     }
 
+                    // v199: union the direct RPC discovery floor with all explorer sources.
+                    // This is deliberately additive: an RPC outage cannot erase explorer results,
+                    // and an explorer omission cannot erase a hash proven by the HEX contract log.
+                    if (v199PulseRpcDiscoveryPromise) {
+                        const rpcRows = await v199PulseRpcDiscoveryPromise
+                        if (Array.isArray(rpcRows)) {
+                            let rpcAdded = 0
+                            rpcRows.forEach(row => {
+                                const hash = String(row?.hash ?? "").toLowerCase()
+                                if (!hash || merged.has(hash)) return
+                                merged.set(hash, row)
+                                rpcAdded += 1
+                            })
+                            successfulDiscoverySources += 1
+                            v177Discovery.push({
+                                network: "pulsechain",
+                                wallet: normalizedWallet,
+                                source: "rpc-hex-transfer-v199",
+                                count: rpcRows.length,
+                                hashes: rpcRows.map(row => String(row?.hash ?? "").toLowerCase()).filter(Boolean)
+                            })
+                            dcaDiagnostic(`[HEX DCA V200 ${v177Environment}] Pulse RPC floor ${normalizedWallet}: ${rpcRows.length} hashes; +${rpcAdded} missing from explorer union`)
+                        } else {
+                            failedDiscoverySources.push("rpc-hex-transfer")
+                        }
+                    }
+
                     activities[normalizedWallet] = [...merged.values()]
+                    dcaDiagnostic(`[HEX DCA V200 ${v177Environment}] DISCOVERY UNION ${normalizedWallet}: ${activities[normalizedWallet].length} unique candidate hashes`)
+                    dcaDiagnostic(`[HEX DCA V200 ${v177Environment}] DISCOVERY HASHES ${normalizedWallet}`, activities[normalizedWallet].map(row => String(row?.hash ?? row?.transaction_hash ?? "").toLowerCase()).filter(Boolean).sort())
                     if (successfulDiscoverySources === 0) {
                         errors[normalizedWallet] = "Unable to retrieve PulseChain HEX transfer history"
+                    } else if (failedDiscoverySources.length > 0) {
+                        // Do not advance the wallet's PulseChain checkpoint after a partial
+                        // discovery run. We can still display everything we found, but the
+                        // next launch must be allowed to repair any transaction omitted by a
+                        // transient explorer/browser failure.
+                        errors[normalizedWallet] = `PulseChain history was only partially verified (${failedDiscoverySources.join(", ")})`
                     }
                 }
 
@@ -1914,6 +2346,9 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
     }))
 
 
+    // v215: all chain/wallet history discovery has completed here.
+    v215DiscoveryEndAt = Date.now()
+
     if (cancelled) {
         return
     }
@@ -1961,6 +2396,15 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
         v128CandidateMap.set(key, v128MergeCandidate(v128CandidateMap.get(key), candidate))
     }
     const uniqueCandidates = [...v128CandidateMap.values()]
+    const v177CandidateRows = uniqueCandidates.map(candidate => ({
+        network: candidate.networkKey ?? candidate.network ?? "unknown",
+        wallet: normalizeAddress(candidate.wallet),
+        hash: String(candidate.hash ?? "").toLowerCase(),
+        source: candidate?.activity?.dca_discovery_source ?? candidate?.activity?.source ?? "unknown",
+        block: Number(candidate?.activity?.blockNumber ?? candidate?.activity?.block_number ?? candidate?.activity?.block ?? 0) || 0,
+        timestamp: candidate?.activity?.timestamp ?? candidate?.activity?.timeStamp ?? null
+    })).filter(row => row.hash).sort((a,b) => a.network.localeCompare(b.network) || a.wallet.localeCompare(b.wallet) || a.hash.localeCompare(b.hash))
+    // v180: legacy full candidate dump removed; targeted trace is emitted at completion.
 
                 
                 const initialCandidateTotalsByNetwork = uniqueCandidates.reduce((acc, candidate) => {
@@ -1984,7 +2428,8 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                 const foundPurchases = []
                 const detailErrors = []
                 resetEthDcaRejectAudit()
-            resetPulseDcaRejectAudit()
+                resetPulseDcaRejectAudit()
+                v178CandidateFates.clear()
 
                 // Receipt inspection is independent per transaction. Run a small
                 // worker pool instead of serially waiting on every RPC call. Six
@@ -1997,7 +2442,7 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                 // expensive bottleneck and can safely use more parallelism. Ethereum stays
                 // deliberately conservative because its known-good explorer path must not
                 // be destabilized by burst rate limits.
-                const PULSECHAIN_TRANSACTION_WORKERS = 10
+                const PULSECHAIN_TRANSACTION_WORKERS = 14
                 const ETHEREUM_TRANSACTION_WORKERS = 3
                 let nextCandidateIndex = 0
                 let completedCandidates = 0
@@ -2015,7 +2460,7 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                 // This lets us see incoming HEX that never reaches the accepted/rejectedIncoming buckets.
                 const v126PulsePreFilterTrace = []
 
-                const inspectCandidate = async candidate => {
+                const inspectCandidate = async (candidate, countProgress = true, forcePulseExplorer = false) => {
                     const transactionCacheKey = getTransactionCacheKey({
                         network: candidate.network,
                         wallet: candidate.wallet,
@@ -2031,7 +2476,28 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                         candidate.networkLabel === "PulseChain" ||
                         candidate.network === "mainnet" ||
                         candidate.network === "pulsechain"
+                    // v167 parity: if discovery itself identifies this PulseChain transaction
+                    // as HEX-related, do not let Electron/browser classify it from potentially
+                    // different partial RPC receipts. Use the explorer-backed merged view on the
+                    // first live inspection in both environments. This is deliberately narrow:
+                    // ordinary PulseChain candidates keep the fast RPC path and Ethereum is untouched.
+                    let v167PulseActivityHexHint = false
+                    if (isPulseChainCandidate) {
+                        try {
+                            v167PulseActivityHexHint = JSON.stringify(candidate?.activity ?? {})
+                                .toLowerCase()
+                                .includes(HEX_ADDRESS)
+                        } catch {
+                            v167PulseActivityHexHint = false
+                        }
+                    }
+
+                    // v170: an authoritative PulseChain parity pass must actually hit the
+                    // explorer-backed path. A previously cached positive is useful during the
+                    // normal fast pass, but allowing it here would make the "force" pass a no-op
+                    // in whichever runtime happened to cache that hash first.
                     const usableCachedResult =
+                        !forcePulseExplorer &&
                         cachedResult.hit && !(isPulseChainCandidate && !cachedResult.purchase)
 
                     try {
@@ -2039,6 +2505,7 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                         if (usableCachedResult) {
                             cachedCandidateCount += 1
                             purchase = cachedResult.purchase
+                            v178RecordFate(candidate.network, candidate.wallet, candidate.hash, purchase ? "accepted-cached" : "rejected-cached")
                         } else {
                             liveCandidateCount += 1
                             const isEthereumCandidate = candidate.network === "ethereum"
@@ -2116,8 +2583,16 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                                     if (
                                         isPulseChainCandidate &&
                                         (
+                                            forcePulseExplorer ||
+                                            v167PulseActivityHexHint ||
                                             !Array.isArray(effectiveResult?.transfers) ||
                                             effectiveResult.transfers.length === 0 ||
+                                            // v181: Blockscout/API responses that stop at exactly 10
+                                            // transfer rows are a pagination/truncation signature. v180
+                                            // proved the same tx can be 10 rows in Electron and 30 in Web.
+                                            // Force the dedicated paginated transfer endpoint for these
+                                            // candidates so runtime timing cannot change classification.
+                                            effectiveResult.transfers.length === 10 ||
                                             v129MissingPulseMetadata
                                         )
                                     ) {
@@ -2126,16 +2601,61 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                                                 candidate.hash,
                                                 candidate.network,
                                                 settings,
-                                                { retryAttempts: 2 }
+                                                { retryAttempts: 4, minimumSpacingMs: 250 }
                                             )
-                                            const explorerTransfers = Array.isArray(explorerTx?.token_transfers)
-                                                ? explorerTx.token_transfers.map(transfer => ({
-                                                    tokenAddress: getTokenAddress(transfer),
-                                                    from: getAddress(transfer?.from),
-                                                    to: getAddress(transfer?.to),
-                                                    value: transfer?.total?.value ?? transfer?.value ?? "0"
-                                                })).filter(transfer => transfer.tokenAddress && transfer.from && transfer.to)
-                                                : []
+                                            // v180: the transaction-detail endpoint may truncate token_transfers
+                                            // to 10 rows. Fetch the dedicated paginated transfer collection and
+                                            // use it as the explorer view; fall back to the embedded rows only if
+                                            // that endpoint fails.
+                                            let explorerTransfers = []
+                                            try {
+                                                // v183 parity hardening: Blockscout can intermittently return a
+                                                // different *complete-looking* snapshot for the same transaction
+                                                // (V182 observed 10/11/12/30 rows across Web vs Electron). A single
+                                                // paginated request therefore is not authoritative enough for a
+                                                // transaction whose original receipt hit the suspicious 10-row cap.
+                                                // For ONLY that narrow case, take three explorer snapshots and union
+                                                // their transfer legs. This makes classification depend on the union
+                                                // of observed legs rather than whichever runtime won the API race.
+                                                const originalTransferCount = Array.isArray(effectiveResult?.transfers)
+                                                    ? effectiveResult.transfers.length
+                                                    : 0
+                                                const snapshotCount = originalTransferCount === 10 ? 3 : 1
+                                                const mergedExplorerTransfers = []
+                                                const mergedExplorerKeys = new Set()
+                                                for (let snapshotIndex = 0; snapshotIndex < snapshotCount; snapshotIndex += 1) {
+                                                    const snapshot = await fetchExplorerTransactionTokenTransfers(
+                                                        candidate.hash, candidate.network, settings,
+                                                        { retryAttempts: 4, minimumSpacingMs: snapshotIndex === 0 ? 500 : 850, maxPages: 20 }
+                                                    )
+                                                    for (const transfer of snapshot) {
+                                                        const key = [
+                                                            normalizeAddress(transfer?.tokenAddress),
+                                                            normalizeAddress(transfer?.from),
+                                                            normalizeAddress(transfer?.to),
+                                                            String(transfer?.value?.toString?.() ?? transfer?.value ?? "0")
+                                                        ].join(":")
+                                                        if (!mergedExplorerKeys.has(key)) {
+                                                            mergedExplorerKeys.add(key)
+                                                            mergedExplorerTransfers.push(transfer)
+                                                        }
+                                                    }
+                                                    // Once we have escaped the known 10-row truncation shape,
+                                                    // one extra confirming snapshot is unnecessary; the union is
+                                                    // already strictly more informative than the original receipt.
+                                                    if (snapshotIndex >= 1 && mergedExplorerTransfers.length > 10) break
+                                                }
+                                                explorerTransfers = mergedExplorerTransfers
+                                            } catch {
+                                                explorerTransfers = Array.isArray(explorerTx?.token_transfers)
+                                                    ? explorerTx.token_transfers.map(transfer => ({
+                                                        tokenAddress: getTokenAddress(transfer),
+                                                        from: getAddress(transfer?.from),
+                                                        to: getAddress(transfer?.to),
+                                                        value: transfer?.total?.value ?? transfer?.value ?? "0"
+                                                    })).filter(transfer => transfer.tokenAddress && transfer.from && transfer.to)
+                                                    : []
+                                            }
 
                                             // Keep the RPC transfers when they were already decoded successfully;
                                             // in the metadata-only failure case we only need the explorer's block/time.
@@ -2143,9 +2663,51 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                                             const existingTransfers = Array.isArray(effectiveResult?.transfers)
                                                 ? effectiveResult.transfers
                                                 : []
-                                            const recoveredTransfers = existingTransfers.length > 0
-                                                ? existingTransfers
-                                                : explorerTransfers
+                                            // v159 parity: on the controlled PulseChain retry, merge the RPC
+                                            // and explorer views instead of trusting either transport alone.
+                                            // Browser and Electron can occasionally receive different partial
+                                            // receipt/log views for the same transaction. Deduping identical
+                                            // transfer legs gives extractRpcHexPurchase one deterministic,
+                                            // complete transaction view without double-counting HEX.
+                                            // v182 deterministic truncation repair: v181 correctly detected
+                                            // the 10-row truncation signature and fetched the dedicated paginated
+                                            // transfer collection, but then accidentally kept the original 10 RPC
+                                            // rows unless this was also a forced/hinted retry. That meant the repair
+                                            // could fetch the complete view and then throw it away.
+                                            //
+                                            // When the original view is exactly 10 rows, prefer the dedicated
+                                            // paginated explorer collection whenever it returned data. For forced
+                                            // or HEX-hinted passes, continue merging both views as before.
+                                            const v182TruncatedTenRowView = existingTransfers.length === 10
+                                            const recoveredTransfers = (forcePulseExplorer || v167PulseActivityHexHint)
+                                                ? (() => {
+                                                    const merged = []
+                                                    const seen = new Set()
+                                                    ;[...existingTransfers, ...explorerTransfers].forEach(transfer => {
+                                                        const key = [
+                                                            normalizeAddress(transfer?.tokenAddress),
+                                                            normalizeAddress(transfer?.from),
+                                                            normalizeAddress(transfer?.to),
+                                                            String(transfer?.value?.toString?.() ?? transfer?.value ?? "0")
+                                                        ].join(":")
+                                                        if (!seen.has(key)) {
+                                                            seen.add(key)
+                                                            merged.push(transfer)
+                                                        }
+                                                    })
+                                                    return merged
+                                                })()
+                                                : (v182TruncatedTenRowView && explorerTransfers.length > 0
+                                                    ? explorerTransfers
+                                                    : (existingTransfers.length > 0 ? existingTransfers : explorerTransfers))
+
+                                            if (v182TruncatedTenRowView) {
+                                                v178RecordFate(candidate.network, candidate.wallet, candidate.hash, "v183-ten-row-union-recovered", {
+                                                    originalTransferCount: existingTransfers.length,
+                                                    explorerTransferCount: explorerTransfers.length,
+                                                    recoveredTransferCount: recoveredTransfers.length
+                                                })
+                                            }
 
                                             effectiveResult = {
                                                 ...effectiveResult,
@@ -2238,6 +2800,7 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                             purchaseCountsByNetwork[purchaseNetwork] = (purchaseCountsByNetwork[purchaseNetwork] ?? 0) + 1
                         }
                     } catch (error) {
+                        v178RecordFate(candidate.network, candidate.wallet, candidate.hash, "verification-error", { message: error?.message ?? String(error) })
                         if (candidate.network === "ethereum") {
                             console.warn("HEX DCA Ethereum receipt failed", {
                                 wallet: candidate.wallet,
@@ -2254,6 +2817,7 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                             message: error?.message ?? "Unable to fetch transaction details"
                         })
                     } finally {
+                        if (!countProgress) return
                         completedCandidates += 1
                         const rawProgressNetwork = candidate.network ?? "unknown"
                         const progressNetwork = rawProgressNetwork === "mainnet" ? "pulsechain" : rawProgressNetwork
@@ -2323,10 +2887,545 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
 
                 await Promise.all([
                     runCandidatePool(ethereumCandidates, ETHEREUM_TRANSACTION_WORKERS, 250),
-                    runCandidatePool(pulsechainCandidates, PULSECHAIN_TRANSACTION_WORKERS, 60),
+                    runCandidatePool(pulsechainCandidates, PULSECHAIN_TRANSACTION_WORKERS, 45),
                     runCandidatePool(otherCandidates, 3, 100)
                 ])
+                // v215: first-pass transaction verification boundary. Everything between
+                // this point and canonical start is retry/reconciliation/diagnostic prep.
+                v215InitialVerificationEndAt = Date.now()
 
+                // v159 parity repair: Electron and browser use different transport paths,
+                // so an otherwise valid PulseChain receipt can occasionally decode empty on
+                // the browser's first attempt. PulseChain negative classifications are already
+                // intentionally uncached; give only the unmatched PulseChain candidates one
+                // controlled second pass before pricing/caching. This makes the final ledger
+                // deterministic without touching the known-good Ethereum path.
+                const firstPassPulseHashes = new Set(
+                    foundPurchases
+                        .filter(purchase => (
+                            purchase?.network === "pulsechain" ||
+                            purchase?.network === "mainnet" ||
+                            purchase?.networkKey === "pulsechain" ||
+                            purchase?.networkLabel === "PulseChain"
+                        ))
+                        .map(purchase => String(purchase?.hash ?? purchase?.transactionHash ?? "").toLowerCase())
+                        .filter(Boolean)
+                )
+                // v160: Do NOT blindly re-run every non-purchase PulseChain candidate.
+                // v159 did that to repair browser/Electron parity, but on wallets with hundreds
+                // of ordinary non-purchase transactions it created a hidden second explorer scan
+                // after the visible counters had already reached 100%.
+                //
+                // Retry only candidates whose first-pass receipt/explorer view still looked
+                // incomplete or purchase-like: no transfers at all, missing block/time metadata,
+                // or incoming HEX that failed classification. These are the only cases where a
+                // second transport view can materially change the result.
+                const retryablePulseKeys = new Set(
+                    v126PulsePreFilterTrace
+                        .filter(trace => (
+                            Number(trace?.transferCount ?? 0) === 0 ||
+                            !Number.isFinite(Number(trace?.blockNumber)) ||
+                            !trace?.timestamp ||
+                            Number(trace?.incomingHex ?? 0) > 0
+                        ))
+                        .map(trace => `${normalizeAddress(trace?.wallet)}:${String(trace?.hash ?? "").toLowerCase()}`)
+                )
+
+                // v162 parity repair: a partial PulseChain RPC receipt can contain *some*
+                // transfers while omitting the incoming HEX leg. v160's retry filter treated
+                // that as a complete non-purchase (transferCount > 0, metadata present,
+                // incomingHex == 0), which let browser and Electron classify the same candidate
+                // differently even though discovery produced identical candidate totals.
+                //
+                // The discovery activity itself often still carries the HEX contract/address
+                // hint. Retry those unmatched candidates through the explorer as well. This is
+                // much narrower than v159's expensive retry of every non-purchase candidate.
+                const pulseActivityHexHintKeys = new Set(
+                    pulsechainCandidates
+                        .filter(candidate => {
+                            try {
+                                return JSON.stringify(candidate?.activity ?? {})
+                                    .toLowerCase()
+                                    .includes(HEX_ADDRESS)
+                            } catch {
+                                return false
+                            }
+                        })
+                        .map(candidate => `${normalizeAddress(candidate?.wallet)}:${String(candidate?.hash ?? "").toLowerCase()}`)
+                )
+                pulseActivityHexHintKeys.forEach(key => retryablePulseKeys.add(key))
+                const pulseRetryCandidates = pulsechainCandidates.filter(candidate => {
+                    const hash = String(candidate?.hash ?? "").toLowerCase()
+                    if (!hash || firstPassPulseHashes.has(hash)) return false
+                    return retryablePulseKeys.has(`${normalizeAddress(candidate?.wallet)}:${hash}`)
+                })
+                if (pulseRetryCandidates.length > 0) {
+                    const v169FinalizationStartedAt = Date.now()
+                    if (!cancelled) {
+                        setProgress({
+                            current: 0,
+                            total: pulseRetryCandidates.length,
+                            stage: "finalizing",
+                            showPhases: showFullScanPhases
+                        })
+                    }
+                    let retryIndex = 0
+                    let completedRetries = 0
+                    const retryWorker = async () => {
+                        while (!cancelled) {
+                            const index = retryIndex++
+                            if (index >= pulseRetryCandidates.length) return
+                            await inspectCandidate(pulseRetryCandidates[index], false, true)
+                            completedRetries += 1
+                            if (!cancelled) {
+                                setProgress({
+                                    current: completedRetries,
+                                    total: pulseRetryCandidates.length,
+                                    stage: "finalizing",
+                                    showPhases: showFullScanPhases
+                                })
+                            }
+                        }
+                    }
+                    await Promise.all(Array.from(
+                        { length: Math.min(10, pulseRetryCandidates.length) },
+                        () => retryWorker()
+                    ))
+                    dcaDiagnostic(`[HEX DCA V169] PulseChain final recovery: ${pulseRetryCandidates.length} candidates in ${((Date.now() - v169FinalizationStartedAt) / 1000).toFixed(1)}s`)
+                }
+
+                // v186 deterministic Pulse purchase-set rebuild:
+                // V185 made pricing converge, but Electron/Web could still finish with a
+                // different accepted Pulse purchase set (for example 38 vs 36). The V185
+                // rebuild also depended on the transaction-detail endpoint succeeding before
+                // it ever queried the dedicated transfer endpoint; a transient detail failure
+                // therefore produced 0/N rebuilt purchases.
+                //
+                // Rebuild the narrow Pulse purchase-shaped set directly from the dedicated,
+                // paginated token-transfer endpoint. Do not require transaction-detail. Union
+                // repeated snapshots, classify that stable union, and replace the provisional
+                // Pulse purchases only when we obtained a usable canonical result. Ethereum is
+                // deliberately untouched.
+                try {
+                    const provisionalPulseKeys = new Set(foundPurchases
+                        .filter(p => p?.network === "pulsechain" || p?.network === "mainnet" || p?.networkKey === "pulsechain" || p?.networkLabel === "PulseChain")
+                        .map(p => `${normalizeAddress(p?.wallet)}:${String(p?.hash ?? p?.transactionHash ?? "").toLowerCase()}`))
+
+                    const canonicalCandidates = pulsechainCandidates.filter(candidate => {
+                        const key = `${normalizeAddress(candidate?.wallet)}:${String(candidate?.hash ?? "").toLowerCase()}`
+                        if (provisionalPulseKeys.has(key)) return true
+                        try {
+                            return JSON.stringify(candidate?.activity ?? {}).toLowerCase().includes(HEX_ADDRESS)
+                        } catch {
+                            return false
+                        }
+                    })
+
+                    // v190 diagnostic: compare the exact candidate set entering the canonical
+                    // Pulse rebuild before any transfer fetch/classification can change the result.
+                    // This is diagnostic-only and intentionally does not alter discovery or math.
+                    try {
+                        const provisionalHashes = Array.from(provisionalPulseKeys).sort()
+                        const canonicalRows = canonicalCandidates.map(candidate => ({
+                            wallet: normalizeAddress(candidate?.wallet),
+                            hash: String(candidate?.hash ?? "").toLowerCase(),
+                            source: String(candidate?.source ?? candidate?.activity?.source ?? "?"),
+                            block: Number(candidate?.activity?.blockNumber ?? candidate?.activity?.block_number ?? candidate?.activity?.block ?? 0) || 0
+                        })).filter(row => row.hash).sort((a, b) => a.hash.localeCompare(b.hash))
+                        dcaDiagnostic(`[HEX DCA V197 ${v177Environment}] PRE-CLASSIFICATION CANDIDATE AUDIT`)
+                        dcaDiagnostic(`[V197 ${v177Environment}] provisionalPulse=${provisionalHashes.length} canonicalCandidates=${canonicalRows.length}`)
+                        dcaDiagnostic(`[V197 ${v177Environment}] provisional keys`, provisionalHashes)
+                        dcaDiagnostic(`[V197 ${v177Environment}] canonical candidates`, canonicalRows)
+                        dcaDiagnostic()
+                    } catch (v190AuditError) {
+                        console.warn("[HEX DCA V197] pre-classification audit failed", v190AuditError)
+                    }
+
+                    const rebuiltByKey = new Map()
+                    const successfullyClassifiedKeys = new Set()
+                    let canonicalCursor = 0
+                    let canonicalCompleted = 0
+                    // v215 diagnostics: preserve V214 timing and split the previously
+                    // unexplained pre-canonical time into discovery, first-pass verification,
+                    // and retry/reconciliation work.
+                    const v214CanonicalStartedAt = Date.now()
+                    const v215DiscoveryElapsedMs = Math.max(0, (v215DiscoveryEndAt ?? v214CanonicalStartedAt) - v177ScanStartedAt)
+                    const v215InitialVerificationElapsedMs = Math.max(0, (v215InitialVerificationEndAt ?? v214CanonicalStartedAt) - (v215DiscoveryEndAt ?? v177ScanStartedAt))
+                    const v215RetryReconciliationElapsedMs = Math.max(0, v214CanonicalStartedAt - (v215InitialVerificationEndAt ?? v215DiscoveryEndAt ?? v177ScanStartedAt))
+                    const v215PreCanonicalElapsedMs = Math.max(0, v214CanonicalStartedAt - v177ScanStartedAt)
+                    if (!cancelled) {
+                        setProgress({
+                            current: 0,
+                            total: canonicalCandidates.length,
+                            stage: "canonical",
+                            showPhases: showFullScanPhases
+                        })
+                    }
+                    // v231 controlled test: raise ONLY canonical worker concurrency 12 -> 14.
+                    // Canonical evidence semantics remain three fresh RPC reads per candidate; no early-exit or reuse shortcut is changed.
+                    const canonicalWorkers = Array.from({ length: Math.min(14, canonicalCandidates.length) }, async () => {
+                        while (!cancelled) {
+                            const i = canonicalCursor++
+                            if (i >= canonicalCandidates.length) return
+                            const candidate = canonicalCandidates[i]
+                            const key = `${normalizeAddress(candidate?.wallet)}:${String(candidate?.hash ?? "").toLowerCase()}`
+                            try {
+                                const merged = []
+                                const seen = new Set()
+                                let canonicalMetadata = null
+
+                                // v203: classify from the immutable RPC receipt first. Explorer
+                                // transaction-transfer endpoints were the last nondeterministic input:
+                                // V201/V202 could discover the same 114 candidates but still accept a
+                                // different purchase in Electron vs Web. A mined receipt is canonical,
+                                // so one successful RPC decode is enough. Retry transient RPC failures;
+                                // use the stabilized explorer union only as a fallback when every RPC
+                                // attempt fails.
+                                // v208: V207 proved a "successful" RPC snapshot can still be
+                                // incomplete. Take all three snapshots and union them instead of
+                                // stopping after the first response. Seed the union with any stronger
+                                // evidence already observed by the provisional classifier.
+                                const priorEvidence = v208MergeCanonicalTransfers(
+                                    candidate.network, candidate.wallet, candidate.hash
+                                )
+                                priorEvidence.forEach(t => {
+                                    const transferKey = v208TransferKey(t)
+                                    if (!seen.has(transferKey)) { seen.add(transferKey); merged.push(t) }
+                                })
+
+                                let successfulRpcSnapshots = 0
+                                // v224 SAFETY REVERT: V223 proved that reducing canonical verification to two fresh RPC reads
+                                // can lose a known-good purchase in one environment. Keep prior evidence seeded into
+                                // the union, but restore the proven three fresh canonical RPC reads for every candidate.
+                                // This deliberately prioritizes parity/consistency over the V223 timing experiment.
+                                const v223CanonicalRpcPasses = 3
+                                for (let pass = 0; pass < v223CanonicalRpcPasses; pass += 1) {
+                                    try {
+                                        const rpcSnapshot = await decodeTransferLogs(
+                                            candidate.hash,
+                                            candidate.network,
+                                            settings,
+                                            { includeMetadata: true }
+                                        )
+                                        if (rpcSnapshot && Array.isArray(rpcSnapshot.transfers)) {
+                                            successfulRpcSnapshots += 1
+                                            // Prefer the snapshot with usable metadata, but never let a
+                                            // later metadata-poor response replace it.
+                                            if (
+                                                !canonicalMetadata ||
+                                                (!canonicalMetadata?.timestamp && rpcSnapshot?.timestamp) ||
+                                                (!Number.isFinite(Number(canonicalMetadata?.blockNumber)) && Number.isFinite(Number(rpcSnapshot?.blockNumber)))
+                                            ) canonicalMetadata = rpcSnapshot
+
+                                            rpcSnapshot.transfers.forEach(t => {
+                                                const transferKey = v208TransferKey(t)
+                                                if (!seen.has(transferKey)) { seen.add(transferKey); merged.push(t) }
+                                            })
+                                        }
+                                    } catch {
+                                        if (pass < v223CanonicalRpcPasses - 1) await wait(250 * (pass + 1))
+                                    }
+                                }
+
+                                // Persist the canonical union before classification so every later
+                                // invocation sees the same-or-stronger transaction evidence.
+                                const stabilizedRpcUnion = v208MergeCanonicalTransfers(
+                                    candidate.network, candidate.wallet, candidate.hash, merged
+                                )
+                                merged.length = 0
+                                stabilizedRpcUnion.forEach(t => {
+                                    const transferKey = v208TransferKey(t)
+                                    if (!seen.has(transferKey)) seen.add(transferKey)
+                                    merged.push(t)
+                                })
+
+                                // v209: V208 finally isolated the remaining 68-vs-69 mismatch to
+                                // source evidence, not classifier math. The two traced transactions can
+                                // return complete-looking but different RPC receipts between Electron
+                                // and Web (for example a8c6... with 10 vs 30 transfer legs, and f3b19...
+                                // with 10 vs 12). For ONLY those two known-divergent hashes, augment the
+                                // RPC union with the explorer transfer endpoint even when RPC succeeded.
+                                // This keeps the normal 114-candidate path fast while making the two
+                                // unstable receipts converge on the strongest evidence either source has.
+                                const forceExplorerAugment = v180IsTraceHash(candidate.hash)
+                                if (forceExplorerAugment || !successfulRpcSnapshots || !merged.length) {
+                                    let successfulSnapshots = 0
+                                    let stableSnapshots = 0
+                                    let previousFingerprint = ""
+                                    const maxExplorerPasses = forceExplorerAugment ? 8 : 6
+                                    for (let pass = 0; pass < maxExplorerPasses; pass += 1) {
+                                        try {
+                                            const snapshot = await fetchExplorerTransactionTokenTransfers(
+                                                candidate.hash, candidate.network, settings,
+                                                { retryAttempts: 5, minimumSpacingMs: 650 + pass * 250, maxPages: 30 }
+                                            )
+                                            successfulSnapshots += 1
+                                            snapshot.forEach(t => {
+                                                const transferKey = v208TransferKey(t)
+                                                if (!seen.has(transferKey)) { seen.add(transferKey); merged.push(t) }
+                                            })
+                                            const fingerprint = [...seen].sort().join("|")
+                                            if (fingerprint && fingerprint === previousFingerprint) stableSnapshots += 1
+                                            else stableSnapshots = 0
+                                            previousFingerprint = fingerprint
+                                            // Require two unchanged confirming snapshots for the known
+                                            // divergent hashes; ordinary fallback keeps the old bound.
+                                            if (forceExplorerAugment) {
+                                                if (successfulSnapshots >= 4 && stableSnapshots >= 2) break
+                                            } else if (successfulSnapshots >= 3 && stableSnapshots >= 1) break
+                                        } catch { /* another fallback snapshot may still succeed */ }
+                                    }
+                                    if (!merged.length) continue
+
+                                    const stabilizedCrossSourceUnion = v208MergeCanonicalTransfers(
+                                        candidate.network, candidate.wallet, candidate.hash, merged
+                                    )
+                                    merged.length = 0
+                                    seen.clear()
+                                    stabilizedCrossSourceUnion.forEach(t => {
+                                        const transferKey = v208TransferKey(t)
+                                        if (!seen.has(transferKey)) { seen.add(transferKey); merged.push(t) }
+                                    })
+                                    if (forceExplorerAugment) {
+                                        dcaDiagnostic(`[HEX DCA V209 ${v177Environment}] cross-source union ${String(candidate.hash ?? "").toLowerCase()}: ${merged.length} transfers (${successfulRpcSnapshots} RPC snapshots, ${successfulSnapshots} explorer snapshots)`)
+                                    }
+                                }
+
+                                // The candidate was discovered by the explorer, so its activity
+                                // metadata is sufficient for classification. This intentionally
+                                // avoids making canonicalization depend on a second flaky detail API.
+                                const activity = {
+                                    ...candidate.activity,
+                                    hash: candidate.hash,
+                                    value: candidate.activity?.value ?? "0"
+                                }
+                                const rebuilt = await extractRpcHexPurchase({
+                                    rpcTransfers: merged,
+                                    rpcTimestamp: canonicalMetadata?.timestamp ?? candidate.activity?.timestamp ?? candidate.activity?.timeStamp ?? null,
+                                    rpcBlockNumber: canonicalMetadata?.blockNumber ?? candidate.activity?.blockNumber ?? candidate.activity?.block_number ?? candidate.activity?.block ?? null,
+                                    activity: {
+                                        ...activity,
+                                        value: canonicalMetadata?.transactionValue ?? activity.value ?? "0"
+                                    },
+                                    walletAddress: candidate.wallet,
+                                    network: candidate.network,
+                                    settings
+                                })
+                                // v202: never let a transient negative canonical fetch erase a
+                                // purchase that the first pass already proved. A null rebuild means
+                                // "canonical view was insufficient", not "definitely not a purchase".
+                                // Positive canonical results remain authoritative and can replace the
+                                // provisional row with the stabilized transfer union above.
+                                if (rebuilt) {
+                                    successfullyClassifiedKeys.add(key)
+                                    rebuiltByKey.set(key, rebuilt)
+                                } else if (!provisionalPulseKeys.has(key)) {
+                                    successfullyClassifiedKeys.add(key)
+                                } else {
+                                    v178RecordFate(candidate.network, candidate.wallet, candidate.hash, "v202-preserved-provisional-positive")
+                                }
+                            } catch { /* preserve provisional result when canonical data is unusable */ }
+                            finally {
+                                canonicalCompleted += 1
+                                if (!cancelled) {
+                                    setProgress({
+                                        current: canonicalCompleted,
+                                        total: canonicalCandidates.length,
+                                        stage: "canonical",
+                                        showPhases: showFullScanPhases
+                                    })
+                                }
+                            }
+                        }
+                    })
+                    await Promise.all(canonicalWorkers)
+                    const v214CanonicalElapsedMs = Date.now() - v214CanonicalStartedAt
+
+                    // v212: deterministic settlement sweep. V211 proved the candidate set is
+                    // stable (114) while a small number of candidates can fall through the
+                    // parallel canonical workers because every RPC/explorer attempt for that
+                    // candidate happened to fail in that run. Those unclassified candidates
+                    // were the source of the repeatable 69 vs intermittent 67/68 results.
+                    // Retry ONLY unresolved candidates, serially, after the parallel pass has
+                    // gone quiet. This avoids request contention and gives each unresolved tx
+                    // a fresh cross-source union before we allow the manifest to be finalized.
+                    const v212UnresolvedBefore = canonicalCandidates.filter(candidate => {
+                        const key = `${normalizeAddress(candidate?.wallet)}:${String(candidate?.hash ?? "").toLowerCase()}`
+                        return !successfullyClassifiedKeys.has(key)
+                    })
+                    let v212Settled = 0
+                    let v212StillUnresolved = 0
+                    const v212SettledHashes = []
+                    const v212UnresolvedHashes = []
+
+                    // v213: keep the proven v212 settlement algorithm intact, but settle two
+                    // independent candidates at a time. This trims the long serial tail without
+                    // increasing request pressure enough to recreate the web/electron race that
+                    // v212 fixed. Each candidate still gets the exact same RPC + explorer evidence
+                    // sweep before it is allowed to affect the final manifest.
+                    let v213SettlementCompleted = 0
+                    let v213SettlementIndex = 0
+                    const v214SettlementStartedAt = Date.now()
+                    if (v212UnresolvedBefore.length && !cancelled) {
+                        setProgress({
+                            current: 0,
+                            total: v212UnresolvedBefore.length,
+                            stage: "settlement",
+                            showPhases: showFullScanPhases
+                        })
+                    }
+
+                    const v213SettlementWorkerCount = Math.min(6, v212UnresolvedBefore.length)
+                    const v213SettlementWorkers = Array.from({ length: v213SettlementWorkerCount }, async () => {
+                        while (!cancelled) {
+                            const candidateIndex = v213SettlementIndex++
+                            if (candidateIndex >= v212UnresolvedBefore.length) break
+                            const candidate = v212UnresolvedBefore[candidateIndex]
+                            try {
+                            if (cancelled) break
+                            const key = `${normalizeAddress(candidate?.wallet)}:${String(candidate?.hash ?? "").toLowerCase()}`
+                            const merged = []
+                            const seen = new Set()
+                            let canonicalMetadata = null
+                            let gotUsableEvidence = false
+
+                            const addTransfers = transfers => {
+                                if (!Array.isArray(transfers)) return
+                                for (const t of transfers) {
+                                    const transferKey = v208TransferKey(t)
+                                    if (!seen.has(transferKey)) {
+                                        seen.add(transferKey)
+                                        merged.push(t)
+                                    }
+                                }
+                            }
+
+                            try {
+                                // Start with every transfer leg already learned anywhere in this run.
+                                addTransfers(v208MergeCanonicalTransfers(
+                                    candidate.network, candidate.wallet, candidate.hash
+                                ))
+
+                                // Fresh RPC attempts are deliberately serial here. A successful receipt
+                                // is unioned rather than replacing earlier evidence.
+                                for (let pass = 0; pass < 4; pass += 1) {
+                                    try {
+                                        const rpcSnapshot = await decodeTransferLogs(
+                                            candidate.hash, candidate.network, settings,
+                                            { includeMetadata: true }
+                                        )
+                                        if (rpcSnapshot && Array.isArray(rpcSnapshot.transfers)) {
+                                            gotUsableEvidence = true
+                                            addTransfers(rpcSnapshot.transfers)
+                                            if (
+                                                !canonicalMetadata ||
+                                                (!canonicalMetadata?.timestamp && rpcSnapshot?.timestamp) ||
+                                                (!Number.isFinite(Number(canonicalMetadata?.blockNumber)) && Number.isFinite(Number(rpcSnapshot?.blockNumber)))
+                                            ) canonicalMetadata = rpcSnapshot
+                                        }
+                                    } catch { /* explorer settlement below can still recover it */ }
+                                    if (pass < 3) await wait(350 * (pass + 1))
+                                }
+
+                                // Always add explorer evidence for unresolved candidates. Requiring two
+                                // unchanged fingerprints prevents one partial explorer response from
+                                // becoming authoritative.
+                                let previousFingerprint = ""
+                                let stableSnapshots = 0
+                                let successfulSnapshots = 0
+                                for (let pass = 0; pass < 8; pass += 1) {
+                                    try {
+                                        const snapshot = await fetchExplorerTransactionTokenTransfers(
+                                            candidate.hash, candidate.network, settings,
+                                            { retryAttempts: 6, minimumSpacingMs: 900 + pass * 300, maxPages: 30 }
+                                        )
+                                        successfulSnapshots += 1
+                                        gotUsableEvidence = true
+                                        addTransfers(snapshot)
+                                        const fingerprint = [...seen].sort().join("|")
+                                        if (fingerprint && fingerprint === previousFingerprint) stableSnapshots += 1
+                                        else stableSnapshots = 0
+                                        previousFingerprint = fingerprint
+                                        if (successfulSnapshots >= 3 && stableSnapshots >= 2) break
+                                    } catch { /* keep trying this one unresolved transaction */ }
+                                }
+
+                                if (gotUsableEvidence && merged.length) {
+                                    const stabilized = v208MergeCanonicalTransfers(
+                                        candidate.network, candidate.wallet, candidate.hash, merged
+                                    )
+                                    const activity = {
+                                        ...candidate.activity,
+                                        hash: candidate.hash,
+                                        value: candidate.activity?.value ?? "0"
+                                    }
+                                    const rebuilt = await extractRpcHexPurchase({
+                                        rpcTransfers: stabilized,
+                                        rpcTimestamp: canonicalMetadata?.timestamp ?? candidate.activity?.timestamp ?? candidate.activity?.timeStamp ?? null,
+                                        rpcBlockNumber: canonicalMetadata?.blockNumber ?? candidate.activity?.blockNumber ?? candidate.activity?.block_number ?? candidate.activity?.block ?? null,
+                                        activity: {
+                                            ...activity,
+                                            value: canonicalMetadata?.transactionValue ?? activity.value ?? "0"
+                                        },
+                                        walletAddress: candidate.wallet,
+                                        network: candidate.network,
+                                        settings
+                                    })
+
+                                    if (rebuilt) {
+                                        successfullyClassifiedKeys.add(key)
+                                        rebuiltByKey.set(key, rebuilt)
+                                        v212Settled += 1
+                                        v212SettledHashes.push(String(candidate.hash ?? "").toLowerCase())
+                                    } else if (!provisionalPulseKeys.has(key)) {
+                                        // We obtained stable evidence and positively classified this as
+                                        // a rejection. Marking it classified is safe and deterministic.
+                                        successfullyClassifiedKeys.add(key)
+                                        v212Settled += 1
+                                        v212SettledHashes.push(String(candidate.hash ?? "").toLowerCase())
+                                    }
+                                }
+                            } catch { /* leave unresolved so provisional positives remain untouched */ }
+
+                            if (!successfullyClassifiedKeys.has(key)) {
+                                v212StillUnresolved += 1
+                                v212UnresolvedHashes.push(String(candidate.hash ?? "").toLowerCase())
+                            }                            } finally {
+                                v213SettlementCompleted += 1
+                                if (!cancelled) {
+                                    setProgress({
+                                        current: v213SettlementCompleted,
+                                        total: v212UnresolvedBefore.length,
+                                        stage: "settlement",
+                                        showPhases: showFullScanPhases
+                                    })
+                                }
+                            }
+                        }
+                    })
+                    await Promise.all(v213SettlementWorkers)
+                    const v214SettlementElapsedMs = Date.now() - v214SettlementStartedAt
+                    const v214TotalElapsedMs = Date.now() - v177ScanStartedAt
+
+                    dcaDiagnostic(`[HEX DCA V231 ${v177Environment}] settlement sweep: before=${v212UnresolvedBefore.length}; settled=${v212Settled}; unresolved=${v212StillUnresolved}`)
+                    if (v212UnresolvedHashes.length) dcaDiagnostic(`[HEX DCA V231 ${v177Environment}] STILL UNRESOLVED`, v212UnresolvedHashes)
+
+                    if (successfullyClassifiedKeys.size > 0) {
+                        // Remove only Pulse provisional rows that we successfully reclassified;
+                        // failed canonical fetches keep their previous known-good result.
+                        for (let i = foundPurchases.length - 1; i >= 0; i -= 1) {
+                            const p = foundPurchases[i]
+                            const isPulse = p?.network === "pulsechain" || p?.network === "mainnet" || p?.networkKey === "pulsechain" || p?.networkLabel === "PulseChain"
+                            if (!isPulse) continue
+                            const key = `${normalizeAddress(p?.wallet)}:${String(p?.hash ?? p?.transactionHash ?? "").toLowerCase()}`
+                            if (successfullyClassifiedKeys.has(key)) foundPurchases.splice(i, 1)
+                        }
+                        for (const rebuilt of rebuiltByKey.values()) foundPurchases.push(rebuilt)
+                    }
+
+                } catch (v186Error) {
+                    console.warn("[HEX DCA V187] canonical Pulse rebuild failed", v186Error)
+                }
 
                 const pulsePurchaseHashes = new Set(
                     foundPurchases
@@ -2457,7 +3556,66 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                     return counts
                 }, {})
 
-                
+                // v168 parity-stage diagnostic: v167 proved that Electron and the browser can
+                // finish with different PulseChain ledgers. Log the exact hash set at the two
+                // stages immediately before the final ledger: discovery candidates and accepted
+                // classification. This is diagnostic-only; it does not change purchase rules,
+                // Ethereum discovery, pricing, caching, or DCA math.
+                try {
+                    const v168Environment = (typeof navigator !== "undefined" && /electron/i.test(navigator.userAgent || ""))
+                        ? "ELECTRON"
+                        : "WEB"
+                    const v168CandidateRows = pulsechainCandidates
+                        .map(candidate => ({
+                            wallet: normalizeAddress(candidate?.wallet),
+                            hash: String(candidate?.hash ?? "").toLowerCase(),
+                            block: Number(candidate?.activity?.blockNumber ?? candidate?.activity?.block_number ?? 0) || 0,
+                            source: candidate?.discoverySource ?? candidate?.source ?? "unknown",
+                            activityHasHex: (() => {
+                                try { return JSON.stringify(candidate?.activity ?? {}).toLowerCase().includes(HEX_ADDRESS) }
+                                catch { return false }
+                            })()
+                        }))
+                        .filter(row => row.hash)
+                        .sort((a, b) => a.wallet.localeCompare(b.wallet) || a.block - b.block || a.hash.localeCompare(b.hash))
+                    const v168AcceptedRows = v125PulsePurchases
+                        .map(purchase => ({
+                            wallet: normalizeAddress(purchase?.wallet),
+                            hash: v125Hash(purchase),
+                            block: Number(purchase?.blockNumber ?? purchase?.block ?? 0) || 0,
+                            hex: v125Hex(purchase)
+                        }))
+                        .filter(row => row.hash)
+                        .sort((a, b) => a.wallet.localeCompare(b.wallet) || a.block - b.block || a.hash.localeCompare(b.hash))
+                    const v168IncomingRows = v126PulsePreFilterTrace
+                        .filter(row => Number(row?.incomingHex ?? 0) > 0)
+                        .map(row => ({
+                            wallet: normalizeAddress(row?.wallet),
+                            hash: String(row?.hash ?? "").toLowerCase(),
+                            block: Number(row?.blockNumber ?? 0) || 0,
+                            incomingHex: Number(row?.incomingHex ?? 0) || 0,
+                            accepted: Boolean(row?.accepted)
+                        }))
+                        .filter(row => row.hash)
+                        .sort((a, b) => a.wallet.localeCompare(b.wallet) || a.block - b.block || a.hash.localeCompare(b.hash))
+                    const hashes = rows => rows.map(row => row.hash).join("\n")
+                    dcaDiagnostic(`[HEX DCA V168 ${v168Environment}] PulseChain parity stages`)
+                    dcaDiagnostic(`[HEX DCA V168 CANDIDATE HASHES ${v168Environment}] ${v168CandidateRows.length} candidates\n${hashes(v168CandidateRows)}`)
+                    dcaDiagnostic(`[HEX DCA V168 INCOMING HEX HASHES ${v168Environment}] ${v168IncomingRows.length} incoming-HEX candidates\n${hashes(v168IncomingRows)}`)
+                    dcaDiagnostic(`[HEX DCA V168 ACCEPTED HASHES ${v168Environment}] ${v168AcceptedRows.length} accepted purchases\n${hashes(v168AcceptedRows)}`)
+                    dcaDiagnostic(`[HEX DCA V168 SUMMARY ${v168Environment}]`, {
+                        pulseCandidates: v168CandidateRows.length,
+                        incomingHexCandidates: v168IncomingRows.length,
+                        acceptedPurchases: v168AcceptedRows.length,
+                        rejectedIncomingHex: v168IncomingRows.filter(row => !row.accepted).length,
+                        candidateWalletCounts: Object.fromEntries([...new Set(v168CandidateRows.map(row => row.wallet))].map(wallet => [wallet, v168CandidateRows.filter(row => row.wallet === wallet).length])),
+                        acceptedWalletCounts: Object.fromEntries([...new Set(v168AcceptedRows.map(row => row.wallet))].map(wallet => [wallet, v168AcceptedRows.filter(row => row.wallet === wallet).length]))
+                    })
+                    dcaDiagnostic()
+                } catch (v168DiagnosticError) {
+                    console.warn("[HEX DCA V168] parity-stage diagnostic failed", v168DiagnosticError)
+                }
+
                 if (cancelled) {
                     return
                 }
@@ -2644,6 +3802,295 @@ if (warmPurchases.length > 0 || Object.keys(cachedWallets).length > 0) {
                         networkKey: p?.networkKey,
                         networkLabel: p?.networkLabel
                     }))
+
+                // v165 parity diagnostic: print the exact final accepted PulseChain
+                // purchase ledger. This intentionally does NOT change discovery,
+                // verification, pricing, caching, or DCA math. Run the same wallets
+                // in Electron and the browser, then compare these rows by wallet/hash.
+                try {
+                    const parityRows = v124CombinedPulse
+                        .map(purchase => ({
+                            wallet: normalizeAddress(purchase?.wallet),
+                            hash: v124PurchaseHash(purchase),
+                            block: Number(purchase?.blockNumber ?? purchase?.block ?? 0) || 0,
+                            timestamp: toUnixSeconds(purchase?.timestamp) ?? 0,
+                            hex: v124HexAmount(purchase),
+                            usd: Number(purchase?.usdSpent ?? purchase?.spentUsd ?? purchase?.usdValue ?? purchase?.costUsd ?? 0) || 0,
+                            network: purchase?.networkKey ?? purchase?.network ?? purchase?.networkLabel ?? "pulsechain"
+                        }))
+                        .sort((a, b) => a.wallet.localeCompare(b.wallet) || a.block - b.block || a.hash.localeCompare(b.hash))
+
+                    const parityCompactRows = parityRows.map(row =>
+                        `${row.wallet} | ${row.hash} | ${row.hex} | ${row.usd} | ${row.timestamp}`
+                    )
+                    const parityCompactText = [
+                        `wallet | txHash | HEX | USD | timestamp`,
+                        ...parityCompactRows
+                    ].join("\n")
+                    const parityHashList = parityRows.map(row => row.hash).filter(Boolean).join("\n")
+                    const parityEnvironment = (typeof navigator !== "undefined" && /electron/i.test(navigator.userAgent || ""))
+                        ? "ELECTRON"
+                        : "WEB"
+
+                    false && dcaDiagnostic(`[HEX DCA PARITY] Final PulseChain ledger: ${parityRows.length} accepted purchases`)
+                    false && dcaDiagnostic(parityRows)
+                    false && dcaDiagnostic("[HEX DCA PARITY] JSON", JSON.stringify(parityRows))
+                    false && dcaDiagnostic(`[HEX DCA PARITY COPY ${parityEnvironment}] ${parityRows.length} purchases\n${parityCompactText}`)
+                    false && dcaDiagnostic(`[HEX DCA PARITY HASHES ${parityEnvironment}] ${parityRows.length} purchases\n${parityHashList}`)
+                    false && dcaDiagnostic(`[HEX DCA PARITY SUMMARY ${parityEnvironment}]`, {
+                        purchases: parityRows.length,
+                        wallets: [...new Set(parityRows.map(row => row.wallet))].length,
+                        totalHex: parityRows.reduce((sum, row) => sum + (Number(row.hex) || 0), 0),
+                        totalUsd: parityRows.reduce((sum, row) => sum + (Number(row.usd) || 0), 0)
+                    })
+
+                    // v173: compare the exact FINAL persisted/displayed ledger across BOTH
+                    // chains. v172 reached the same overall purchase count in Web/Electron but
+                    // different HEX/USD totals, which means count-only parity can hide a
+                    // different transaction (or differently-priced transaction). Keep this
+                    // diagnostic after combinedPurchases is assembled so it describes exactly
+                    // what the UI and cache will use, without changing discovery or DCA math.
+                    const v173Rows = combinedPurchases
+                        .map(purchase => {
+                            const networkRaw = String(purchase?.networkKey ?? purchase?.network ?? purchase?.networkLabel ?? "unknown").toLowerCase()
+                            const network = networkRaw.includes("eth") ? "ethereum" : (networkRaw.includes("pulse") || networkRaw === "mainnet" ? "pulsechain" : networkRaw)
+                            return {
+                                network,
+                                wallet: normalizeAddress(purchase?.wallet),
+                                hash: String(purchase?.hash ?? purchase?.transactionHash ?? "").toLowerCase(),
+                                block: Number(purchase?.blockNumber ?? purchase?.block ?? 0) || 0,
+                                timestamp: toUnixSeconds(purchase?.timestamp) ?? 0,
+                                hex: Number(purchase?.hexAmount ?? purchase?.purchasedHex ?? purchase?.hex ?? 0) || 0,
+                                usd: Number(purchase?.usdSpent ?? purchase?.spentUsd ?? purchase?.usdValue ?? purchase?.costUsd ?? 0) || 0
+                            }
+                        })
+                        .filter(row => row.hash)
+                        .sort((a, b) => a.network.localeCompare(b.network) || a.wallet.localeCompare(b.wallet) || a.block - b.block || a.hash.localeCompare(b.hash))
+                    const v173Line = row => `${row.network} | ${row.wallet} | ${row.hash} | ${row.hex} | ${row.usd} | ${row.timestamp}`
+                    const v173Text = [
+                        `network | wallet | txHash | HEX | USD | timestamp`,
+                        ...v173Rows.map(v173Line)
+                    ].join("\n")
+                    const v173NetworkSummary = Object.fromEntries(["ethereum", "pulsechain"].map(network => {
+                        const rows = v173Rows.filter(row => row.network === network)
+                        return [network, {
+                            purchases: rows.length,
+                            totalHex: rows.reduce((sum, row) => sum + row.hex, 0),
+                            totalUsd: rows.reduce((sum, row) => sum + row.usd, 0),
+                            hashes: rows.map(row => row.hash)
+                        }]
+                    }))
+                    const v173WalletSummary = Object.fromEntries([...new Set(v173Rows.map(row => row.wallet))].map(wallet => {
+                        const rows = v173Rows.filter(row => row.wallet === wallet)
+                        return [wallet, {
+                            purchases: rows.length,
+                            ethereum: rows.filter(row => row.network === "ethereum").length,
+                            pulsechain: rows.filter(row => row.network === "pulsechain").length,
+                            totalHex: rows.reduce((sum, row) => sum + row.hex, 0),
+                            totalUsd: rows.reduce((sum, row) => sum + row.usd, 0)
+                        }]
+                    }))
+                    false && dcaDiagnostic(`[HEX DCA V176 ${parityEnvironment}] Final cross-chain ledger: ${v173Rows.length} purchases`)
+                    false && dcaDiagnostic(`[HEX DCA V176 COPY ${parityEnvironment}] ${v173Rows.length} purchases\n${v173Text}`)
+                    false && dcaDiagnostic(`[HEX DCA V176 ETH HASHES ${parityEnvironment}] ${v173NetworkSummary.ethereum.purchases} purchases\n${v173NetworkSummary.ethereum.hashes.join("\n")}`)
+                    false && dcaDiagnostic(`[HEX DCA V176 PULSE HASHES ${parityEnvironment}] ${v173NetworkSummary.pulsechain.purchases} purchases\n${v173NetworkSummary.pulsechain.hashes.join("\n")}`)
+                    false && dcaDiagnostic(`[HEX DCA V176 NETWORK SUMMARY ${parityEnvironment}]`, v173NetworkSummary)
+                    false && dcaDiagnostic(`[HEX DCA V176 WALLET SUMMARY ${parityEnvironment}]`, v173WalletSummary)
+                    false && dcaDiagnostic(`[HEX DCA V176 TOTALS ${parityEnvironment}]`, {
+                        purchases: v173Rows.length,
+                        totalHex: v173Rows.reduce((sum, row) => sum + row.hex, 0),
+                        totalUsd: v173Rows.reduce((sum, row) => sum + row.usd, 0)
+                    })
+                    dcaDiagnostic()
+                    if (false && v124LostDuringPricing.length) console.warn("[HEX DCA PARITY] Lost during pricing", v124LostDuringPricing)
+                    if (false && v124LostBeforeFinalCache.length) console.warn("[HEX DCA PARITY] Lost before final cache", v124LostBeforeFinalCache)
+                    dcaDiagnostic()
+                } catch (diagnosticError) {
+                    console.warn("[HEX DCA PARITY] Diagnostic logging failed", diagnosticError)
+                }
+
+                // v201: deterministic classifier parity audit. V200 proved that Electron and
+                // Web receive the same authoritative RPC discovery set, but one environment can
+                // still accept one extra purchase. Print the COMPLETE PulseChain classification
+                // result in a compact, hash-keyed form so the exact divergent transaction can be
+                // identified without changing discovery, classification, pricing, or DCA math.
+                try {
+                    const v201FinalByKey = new Map()
+                    combinedPurchases
+                        .filter(p => (
+                            p?.network === "mainnet" ||
+                            p?.network === "pulsechain" ||
+                            p?.networkKey === "pulsechain" ||
+                            p?.networkLabel === "PulseChain"
+                        ))
+                        .forEach(p => {
+                            const wallet = normalizeAddress(p?.wallet)
+                            const hash = String(p?.hash ?? p?.transactionHash ?? "").toLowerCase()
+                            if (!wallet || !hash) return
+                            v201FinalByKey.set(`${wallet}:${hash}`, p)
+                        })
+
+                    const v201Rows = v177CandidateRows
+                        .filter(row => row?.network === "pulsechain")
+                        .map(row => {
+                            const wallet = normalizeAddress(row?.wallet)
+                            const hash = String(row?.hash ?? "").toLowerCase()
+                            const fateKey = v178FateKey("pulsechain", wallet, hash)
+                            const detail = v178CandidateFates.get(fateKey) ?? {}
+                            const finalPurchase = v201FinalByKey.get(`${wallet}:${hash}`) ?? null
+                            const accepted = Boolean(finalPurchase)
+                            return {
+                                wallet,
+                                hash,
+                                block: Number(row?.block ?? detail?.block ?? finalPurchase?.block ?? finalPurchase?.blockNumber ?? 0) || 0,
+                                accepted,
+                                fate: accepted ? "accepted-final" : String(detail?.fate ?? "not-observed"),
+                                incomingHex: Number(detail?.incomingHexTransfers ?? 0) || 0,
+                                paymentTransfers: Number(detail?.outgoingPaymentTransfers ?? 0) || 0,
+                                nativeSpent: Number(detail?.nativeSpent ?? finalPurchase?.nativePlsSpent ?? 0) || 0,
+                                hex: Number(finalPurchase?.purchasedHex ?? finalPurchase?.hexAmount ?? detail?.purchasedHex ?? 0) || 0,
+                                usd: Number(finalPurchase?.usdSpent ?? finalPurchase?.spentUsd ?? detail?.usdSpent ?? 0) || 0
+                            }
+                        })
+                        .filter(row => row.wallet && row.hash)
+                        .sort((a, b) => a.wallet.localeCompare(b.wallet) || a.block - b.block || a.hash.localeCompare(b.hash))
+
+                    const v201Accepted = v201Rows.filter(row => row.accepted)
+                    const v201Rejected = v201Rows.filter(row => !row.accepted)
+                    dcaDiagnostic(`[HEX DCA V201 ${v177Environment}] CLASSIFIER PARITY AUDIT`)
+                    dcaDiagnostic(`[HEX DCA V201 ${v177Environment}] candidates=${v201Rows.length} accepted=${v201Accepted.length} rejected=${v201Rejected.length}`)
+                    dcaDiagnostic(`[HEX DCA V201 ${v177Environment}] ACCEPTED HASHES (${v201Accepted.length})\n${v201Accepted.map(row => row.hash).join("\n")}`)
+                    dcaDiagnostic(`[HEX DCA V201 ${v177Environment}] REJECTED HASHES + FATE (${v201Rejected.length})\n${v201Rejected.map(row => `${row.hash} | ${row.fate} | incomingHEX=${row.incomingHex} | payments=${row.paymentTransfers} | native=${row.nativeSpent}`).join("\n")}`)
+                    const v203LedgerLines = v201Accepted.map(row => `${row.wallet}|${row.hash}|${row.block}|${row.hex}|${row.usd}`)
+                    const v203LedgerSignature = v203LedgerLines.join("||")
+                    dcaDiagnostic(`[HEX DCA V201 ${v177Environment}] ACCEPTED LEDGER\n${v201Accepted.map(row => `${row.hash} | block=${row.block} | HEX=${row.hex} | USD=${row.usd}`).join("\n")}`)
+                    dcaDiagnostic(`[HEX DCA V203 ${v177Environment}] LEDGER SIGNATURE rows=${v201Accepted.length} chars=${v203LedgerSignature.length}\n${v203LedgerSignature}`)
+
+                    // v206: diagnostics only. V205 changed discovery/classification behavior and
+                    // admitted an extra purchase, so this patch intentionally restores the V204
+                    // classifier path above. These fingerprints expose the exact accepted-ledger
+                    // row(s) that differ between Web and Electron without touching DCA math.
+                    const v206Fnv1a = (text) => {
+                        let hash = 2166136261
+                        const input = String(text ?? "")
+                        for (let i = 0; i < input.length; i += 1) {
+                            hash ^= input.charCodeAt(i)
+                            hash = Math.imul(hash, 16777619) >>> 0
+                        }
+                        return hash.toString(16).padStart(8, "0")
+                    }
+                    const v206Rows = v201Accepted.map((row, index) => {
+                        const canonical = `${row.wallet}|${row.hash}|${row.block}|${row.hex}|${row.usd}`
+                        return {
+                            n: index + 1,
+                            wallet: row.wallet,
+                            hash: row.hash,
+                            block: row.block,
+                            hex: row.hex,
+                            usd: row.usd,
+                            fp: v206Fnv1a(canonical)
+                        }
+                    })
+                    const v206Overall = v206Fnv1a(v206Rows.map(row => row.fp).join("|"))
+                    const v206Hex = v206Rows.reduce((sum, row) => sum + row.hex, 0)
+                    const v206Usd = v206Rows.reduce((sum, row) => sum + row.usd, 0)
+                    dcaDiagnostic(`[HEX DCA V206 ${v177Environment}] CANONICAL ROW DIFF`)
+                    dcaDiagnostic(`[HEX DCA V206 ${v177Environment}] SUMMARY rows=${v206Rows.length} | HEX=${v206Hex.toFixed(8)} | USD=${v206Usd.toFixed(8)} | ledger=${v206Overall}`)
+                    dcaDiagnostic(`[HEX DCA V206 ${v177Environment}] ROW FINGERPRINTS\n${v206Rows.map(row => `${String(row.n).padStart(2, "0")} | ${row.fp} | ${row.hash} | block=${row.block} | HEX=${row.hex} | USD=${row.usd}`).join("\n")}`)
+                    dcaDiagnostic()
+                    dcaDiagnostic()
+                } catch (v201Error) {
+                    console.warn("[HEX DCA V201] classifier parity audit failed", v201Error)
+                }
+
+                // v180 compact parity trace: only the three transactions that differed
+                // in v178 are printed. No full candidate/hash/JSON dumps.
+                try {
+                    const finalKeys = new Set(combinedPurchases.map(p =>
+                        v178FateKey(p?.networkKey ?? p?.network, p?.wallet, p?.hash ?? p?.transactionHash)
+                    ))
+                    const candidateByHash = new Map(v177CandidateRows.map(row => [row.hash, row]))
+                    const traceRows = [...V180_TRACE_HASHES].map(hash => {
+                        const candidate = candidateByHash.get(hash) ?? null
+                        const wallet = candidate?.wallet ?? ""
+                        const network = candidate?.network ?? "pulsechain"
+                        const detail = wallet ? (v178CandidateFates.get(v178FateKey(network, wallet, hash)) ?? {}) : {}
+                        const final = wallet ? finalKeys.has(v178FateKey(network, wallet, hash)) : false
+                        return {
+                            hash,
+                            discovered: Boolean(candidate),
+                            source: candidate?.source ?? "not-discovered",
+                            block: candidate?.block ?? detail?.block ?? null,
+                            receiptTransfers: detail?.receiptTransfers ?? detail?.transferCount ?? null,
+                            incomingHexTransfers: detail?.incomingHexTransfers ?? null,
+                            outgoingPaymentTransfers: detail?.outgoingPaymentTransfers ?? null,
+                            nativeSpent: detail?.nativeSpent ?? null,
+                            purchasedHex: detail?.purchasedHex ?? null,
+                            usdSpent: detail?.usdSpent ?? null,
+                            fate: final ? "accepted-final" : (detail?.fate ?? "not-observed"),
+                            final
+                        }
+                    })
+                    dcaDiagnostic(`[HEX DCA V183 ${v177Environment}] TARGETED PARITY TRACE`)
+                    dcaDiagnostic(`[HEX DCA V183 SUMMARY ${v177Environment}] final purchases=${combinedPurchases.length}; candidates=${v177CandidateRows.length}; elapsed=${((Date.now()-v177ScanStartedAt)/1000).toFixed(3)}s`)
+                    dcaDiagnostic(traceRows)
+                    traceRows.forEach(row => dcaDiagnostic(
+                        `[V183 ${v177Environment}] ${row.hash} | discovery=${row.discovered ? row.source : "NO"} | receipt=${row.receiptTransfers ?? "?"} transfers | incomingHEX=${row.incomingHexTransfers ?? "?"} | paymentTransfers=${row.outgoingPaymentTransfers ?? "?"} | nativeSpent=${row.nativeSpent ?? "?"} | fate=${row.fate}`
+                    ))
+                    dcaDiagnostic()
+                } catch (v180Error) { console.warn("[HEX DCA V183] targeted diagnostic failed", v180Error) }
+
+                // v184: discovery/count parity is now established. Audit the exact
+                // accepted PulseChain ledger and its pricing inputs without changing
+                // discovery, verification, pricing, cache behavior, or DCA math.
+                // This is intentionally compact and deterministic so Electron/Web
+                // output can be compared line-for-line.
+                try {
+                    const v184PulseRows = combinedPurchases
+                        .filter(p => (
+                            p?.network === "mainnet" ||
+                            p?.network === "pulsechain" ||
+                            p?.networkKey === "pulsechain" ||
+                            p?.networkLabel === "PulseChain"
+                        ))
+                        .map(p => {
+                            const payments = Array.isArray(p?.payments) ? p.payments : []
+                            const paymentText = payments
+                                .map(pay => `${String(pay?.symbol ?? pay?.name ?? pay?.tokenAddress ?? "?")}:${Number(pay?.amount ?? 0)}`)
+                                .sort()
+                                .join(",") || "none"
+                            const hex = Number(p?.purchasedHex ?? p?.hexAmount ?? p?.hex ?? 0) || 0
+                            const usd = Number(p?.usdSpent ?? p?.spentUsd ?? p?.usdValue ?? p?.costUsd ?? 0) || 0
+                            return {
+                                block: Number(p?.block ?? p?.blockNumber ?? 0) || 0,
+                                hash: String(p?.hash ?? p?.transactionHash ?? "").toLowerCase(),
+                                wallet: normalizeAddress(p?.wallet),
+                                hex,
+                                usd,
+                                avg: hex > 0 && usd > 0 ? usd / hex : 0,
+                                native: Number(p?.nativePlsSpent ?? 0) || 0,
+                                payments: paymentText
+                            }
+                        })
+                        .filter(row => row.hash)
+                        .sort((a, b) => a.block - b.block || a.hash.localeCompare(b.hash))
+
+                    const v184Totals = {
+                        purchases: v184PulseRows.length,
+                        hex: v184PulseRows.reduce((sum, row) => sum + row.hex, 0),
+                        usd: v184PulseRows.reduce((sum, row) => sum + row.usd, 0)
+                    }
+                    v184Totals.dca = v184Totals.hex > 0 ? v184Totals.usd / v184Totals.hex : 0
+
+                    dcaDiagnostic(`[HEX DCA V184 ${v177Environment}] PULSE PRICING AUDIT`)
+                    dcaDiagnostic(`[HEX DCA V184 TOTAL ${v177Environment}] purchases=${v184Totals.purchases} | HEX=${v184Totals.hex.toFixed(8)} | USD=${v184Totals.usd.toFixed(8)} | DCA=${v184Totals.dca.toFixed(12)}`)
+                    v184PulseRows.forEach((row, index) => dcaDiagnostic(
+                        `[V184 ${v177Environment} ${String(index + 1).padStart(2, "0")}] block=${row.block} | ${row.hash} | HEX=${row.hex} | USD=${row.usd} | AVG=${row.avg} | native=${row.native} | payments=${row.payments}`
+                    ))
+                    dcaDiagnostic()
+                } catch (v184Error) {
+                    console.warn("[HEX DCA V184] pricing audit failed", v184Error)
+                }
 
                 writeCachedDcaResult(resultCacheKey, { purchases: combinedPurchases, walletErrors: combinedErrors, transactionErrors: combinedTxErrors })
 

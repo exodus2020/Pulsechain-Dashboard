@@ -147,9 +147,21 @@ export function LeftNavigation({ fees, toggleMode }) {
     const { setModal } = useModals();
 
     const { estimatedFees, loading, error } = fees
+    // Approximate fee for a standard 21,000-gas native PLS transfer.
+    // Fee (PLS) = gas price (wei) * gas limit / 1e18.
+    const estimatedPlsTransferFee = estimatedFees?.gasPrice
+        ? (Number(estimatedFees.gasPrice) * 21000) / 1e18
+        : null
+    const formatPlsFee = (fee) => {
+        if (!Number.isFinite(fee)) return null
+        if (fee === 0) return '0'
+        if (fee < 0.000001) return fee.toExponential(2)
+        return fee.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')
+    }
+    const isElectronApp = typeof navigator !== 'undefined' && /Electron/i.test(navigator.userAgent)
     const [ gitlabVersion, setGitlabVersion ] = useState(null)
     useEffect(() => {
-        handleCheckForUpdates()
+        if (isElectronApp) handleCheckForUpdates()
     }, [])
 
     const DEV_ADDRESS = "0xb7c85151e4eeD387837B54fD252ff63C4496Fd58"
@@ -166,7 +178,9 @@ export function LeftNavigation({ fees, toggleMode }) {
     }
 
     const handleOpenGitlab = async () => {
-        await window.electron.openExternal('https://github.com/exodus2020/Pulsechain-Dashboard')
+        const url = 'https://github.com/exodus2020/Pulsechain-Dashboard'
+        if (isElectronApp && window?.electron?.openExternal) await window.electron.openExternal(url)
+        else window.open(url, '_blank', 'noopener,noreferrer')
     }
     const isRemoteNewer = (remote, local) => {
         const r = String(remote).split('.').map(Number)
@@ -183,6 +197,7 @@ export function LeftNavigation({ fees, toggleMode }) {
         return false
     }
     const handleCheckForUpdates = async () => {
+        if (!isElectronApp) return
         setGitlabVersion('checking')
 
         try {
@@ -233,19 +248,20 @@ export function LeftNavigation({ fees, toggleMode }) {
                         </div>
                     </div>} */}
                     <div style={{ position: 'absolute', bottom: expanded ? 170 : 55, right: 0, padding: 10 }}>
-                        {expanded ? <div style={{ position: 'relative', color: 'rgb(150,150,150)' }}>
-                            {estimatedFees?.slow?.baseFee ? <span style={{ fontSize: 14, marginRight: 28, whiteSpace: 'nowrap' }}>
-                                {parseFloat(Math.round(estimatedFees?.slow?.baseFee / 1_000) / 1_000).toFixed(2)} mB
+                        {expanded ? <Tooltip content="Estimated transaction gas fee in PLS (standard PLS transfer)" placement="right">
+                        <div style={{ position: 'relative', color: 'rgb(150,150,150)', cursor: 'help' }}>
+                            {estimatedPlsTransferFee != null ? <span style={{ fontSize: 14, marginRight: 28, whiteSpace: 'nowrap' }}>
+                                {formatPlsFee(estimatedPlsTransferFee)} PLS
                             </span> : <span style={{ fontSize: 14, marginRight: 24 }}>
-                                Estimating
+                                {error ? 'Gas unavailable' : 'Estimating'}
                                 </span>}
                             {<div style={{ position: 'absolute', right: 4, bottom: -4 }}>
                                 <Icon icon={icons_list['gas']} size={20}/>
                             </div>}
-                        </div> :
+                        </div></Tooltip> :
                         <div style={{ position: 'relative', color: 'rgb(150,150,150)', width: '100%', textAlign: 'center' }}>
-                            {estimatedFees?.slow?.baseFee ? <span style={{ fontSize: 10, whiteSpace: 'nowrap', marginLeft: 4 }}>
-                                {parseFloat(Math.round(estimatedFees?.slow?.baseFee / 1_000) / 1_000).toFixed(1)} mB
+                            {estimatedPlsTransferFee != null ? <span style={{ fontSize: 10, whiteSpace: 'nowrap', marginLeft: 4 }}>
+                                {formatPlsFee(estimatedPlsTransferFee)} PLS
                             </span> : <span style={{ fontSize: 14, marginRight: 24 }}>
                                 ...
                                 </span>}
@@ -315,7 +331,7 @@ export function LeftNavigation({ fees, toggleMode }) {
                             </div>
                         </div>
 
-                        <div className="mute version" style={expanded ? { right: 12, top: 33, opacity: 1 } : { right: -85, top: 33, opacity: 0, pointerEvents: 'none' }}>
+                        {isElectronApp && <div className="mute version" style={expanded ? { right: 12, top: 33, opacity: 1 } : { right: -85, top: 33, opacity: 0, pointerEvents: 'none' }}>
                             <div>
                                 <span>
                                     {gitlabVersion === 'checking'
@@ -329,7 +345,7 @@ export function LeftNavigation({ fees, toggleMode }) {
                                     : 'Checking for update...'}
                                 </span>
                             </div>
-                        </div>
+                        </div>}
                     </div>
                 </div>
             </div>

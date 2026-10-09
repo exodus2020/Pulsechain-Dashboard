@@ -10,7 +10,6 @@ export default function useUpdateSettings({ context }) {
             return
         }
 
-        console.log('resetting scan to new api')
         context.resetSingleSetting('scan', {
             mainnet: ['https://api.scan.pulsechain.com/api'],
             testnet: ['https://api.scan.v4.testnet.pulsechain.com/api']

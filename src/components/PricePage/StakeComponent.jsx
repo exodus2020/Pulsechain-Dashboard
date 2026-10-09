@@ -315,6 +315,18 @@ export function StakeComponent({hexData, hexDcaData, hexTokenPnl, hexWalletPosit
             return total > 0 ? `Pricing purchase\n${current} of ${total}` : "Retrieving historical prices"
         }
 
+        if (dcaProgress.stage === "canonical" || dcaProgress.stage === "convergence") {
+            return total > 0
+                ? `Final purchase check\n${current} of ${total}`
+                : "Final purchase check"
+        }
+
+        if (dcaProgress.stage === "settlement") {
+            return total > 0
+                ? `Resolving uncertain transactions\n${current} of ${total}`
+                : "Resolving uncertain transactions"
+        }
+
         return "Preparing DCA calculation"
     })()
 
@@ -731,6 +743,9 @@ const fitPnlFontSize = value => {
         if (!dcaLoading) return ""
         if (dcaProgress.stage === "history") return "Scanning"
         if (dcaProgress.stage === "transactions") return "Verifying"
+        if (dcaProgress.stage === "finalizing") return "Finalizing"
+        if (dcaProgress.stage === "canonical") return "Finalizing"
+        if (dcaProgress.stage === "settlement") return "Resolving"
         if (dcaProgress.stage === "pricing") return "Calculating"
         return "Loading"
     })()
@@ -926,7 +941,7 @@ const fitPnlFontSize = value => {
                             whiteSpace: "nowrap",
                             maxWidth: "100%",
                             lineHeight: 1.05,
-                            color: Number.isFinite(dcaReturnPercent) ? (dcaProfit >= 0 ? "#45e88d" : "#ff6868") : undefined
+                            color: Number.isFinite(dcaReturnPercent) ? (dcaProfit >= 0 ? "#45e88d" : "rgb(255,130,130)") : undefined
                         }}>
                             {hasEffectiveDcaPrice && Number.isFinite(dcaReturnPercent)
                                 ? formatSignedUsd(dcaProfit)

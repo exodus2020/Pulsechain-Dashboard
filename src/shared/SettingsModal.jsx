@@ -330,10 +330,18 @@ function SettingsModal({ context }) {
           </Button>
           <div>
             <div>
-              <Button onClick={() => {
+              <Button onClick={async () => {
+                const confirmed = window.confirm(
+                  'Erase ALL PulseChain Dashboard data?\n\n' +
+                  'This will permanently remove your saved wallets, settings, watchlist, DCA/P&L history, and cached data from this app.\n\n' +
+                  'This cannot be undone. Continue?'
+                )
+                if (!confirmed) return
+
                 setSettings(defaultSettings)
-                updateSettings(defaultSettings)
-                eraseData()
+                // IMPORTANT: wait for every persistent cache layer to finish clearing
+                // before reloading. Reloading early can leave Electron DCA caches behind.
+                await eraseData()
                 setModal(false)
                 setKey(null)
                 window.location.reload()

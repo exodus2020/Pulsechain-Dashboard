@@ -89,8 +89,27 @@ function DeleteDataModal() {
 
   const eraseData = async () => {
     try {
-        await window.electron.deleteFile('config.json')
-        console.log('Data erased')
+        if (window.electron?.deleteFile) {
+          await window.electron.deleteFile('config.json')
+        }
+        try { window.localStorage.clear() } catch {}
+        try { window.sessionStorage.clear() } catch {}
+        try {
+          await new Promise((resolve) => {
+            const request = window.indexedDB?.deleteDatabase?.('plsdashboard')
+            if (!request) return resolve()
+            request.onsuccess = () => resolve()
+            request.onerror = () => resolve()
+            request.onblocked = () => resolve()
+          })
+        } catch {}
+        try {
+          if (window.caches?.keys) {
+            const names = await window.caches.keys()
+            await Promise.all(names.map(name => window.caches.delete(name)))
+          }
+        } catch {}
+        console.log('All app data and caches erased')
         window.location.reload()
     } catch (error) {
         console.error('Error erasing data:', error)
@@ -114,8 +133,14 @@ function DeleteDataModal() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '0px 40px' }}>
           <div>
             <div>
-              <Button onClick={() => {
-                eraseData()
+              <Button onClick={async () => {
+                const confirmed = window.confirm(
+                  'Erase ALL PulseChain Dashboard data?\n\n' +
+                  'This will permanently remove your saved wallets, settings, watchlist, DCA/P&L history, and cached data from this app.\n\n' +
+                  'This cannot be undone. Continue?'
+                )
+                if (!confirmed) return
+                await eraseData()
               }} textAlign="center"
               style={{ background: 'rgb(140,60,60)', color: 'white' }}>Erase All Data</Button>
             </div>

@@ -1,5 +1,13 @@
 node_modules/
 dist/
 dist-electron/
-dist_electron/*
--p/
+dist_electron/
+
+# Vendored Web3: keep source, exclude generated dependencies
+vendor/web3/node_modules/
+vendor/web3/dist/
+
+# Local backups and audit reports
+*.backup
+audit-*.json
+src.backup/

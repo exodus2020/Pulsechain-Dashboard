@@ -189,15 +189,36 @@ export default function useFilterBalance({ balanceData, farmData, lpData, hidden
         }))
 
 
-        const displayDefaultTokens = [...Object.keys(defaultTokenInformation), ...Object.keys(watchlist)].sort((a, b) => {
-            const watchlistItemA = watchlist?.[a]?.token?.address ? watchlist[a].token.address : undefined
-            const watchlistItemB = watchlist?.[b]?.token?.address ? watchlist[b].token.address : undefined
+        // Only show Token Watchlist rows that are actually held by at least one
+        // currently-visible wallet. The stored watchlist is intentionally left
+        // untouched so hiding/showing a wallet is instant and never deletes its
+        // discovered tokens or cached P&L data.
+        const tokenAddressForDisplayKey = (key) =>
+            String(watchlist?.[key]?.token?.address ?? key).toLowerCase()
 
-            const aBalance = addressData?.[watchlistItemA ?? a]?.usd ?? 0
-            const bBalance = addressData?.[watchlistItemB ?? b]?.usd ?? 0
-            
-            return bBalance - aBalance
-        })
+        const hasVisibleTokenBalance = (key) => {
+            const tokenAddress = tokenAddressForDisplayKey(key)
+            const balance = addressData?.[tokenAddress]
+            if (!balance) return false
+
+            try {
+                if (BigInt(String(balance?.raw ?? 0)) > 0n) return true
+            } catch {}
+
+            return Number(balance?.normalized ?? 0) > 0
+        }
+
+        const displayDefaultTokens = [...new Set([
+            ...Object.keys(defaultTokenInformation),
+            ...Object.keys(watchlist)
+        ])]
+            .filter(hasVisibleTokenBalance)
+            .filter(key => !data?.hiddenTokens?.[tokenAddressForDisplayKey(key)])
+            .sort((a, b) => {
+                const aBalance = addressData?.[tokenAddressForDisplayKey(a)]?.usd ?? 0
+                const bBalance = addressData?.[tokenAddressForDisplayKey(b)]?.usd ?? 0
+                return bBalance - aBalance
+            })
 
         const displayLiquidityPools = [...displayLps.map(m => ({...m, type: 'lp'})), ...displayFarms.map(m => ({...m, type: 'farm'}))]
         displayLiquidityPools.sort((a, b) => {
@@ -220,7 +241,9 @@ export default function useFilterBalance({ balanceData, farmData, lpData, hidden
         hiddenWallets,
         visibleWallets,
         hideZeroValue,
-        data?.lpWatchlist
+        data?.lpWatchlist,
+        data?.watchlist,
+        data?.hiddenTokens
     ])
 
     return {

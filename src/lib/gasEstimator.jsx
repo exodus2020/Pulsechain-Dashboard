@@ -1,5 +1,5 @@
 // eip1559.jsx
-import Web3 from 'web3';
+import Web3 from './web3Vendor.js';
 
 // Constants from original implementation
 const GWEI = 1000000000n;

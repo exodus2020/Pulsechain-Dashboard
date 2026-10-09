@@ -28,16 +28,66 @@ const defaultContext = {
     aliases: {}
 }
 
+const BROWSER_CONFIG_KEY = 'pulsechain-dashboard-config'
+const BROWSER_HIDDEN_TOKENS_KEY = 'pulsechain-dashboard-hidden-tokens-v1'
+
+const readBrowserHiddenTokens = () => {
+    try {
+        const value = JSON.parse(window.localStorage.getItem(BROWSER_HIDDEN_TOKENS_KEY) || '{}')
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+    } catch { return {} }
+}
+
+const persistBrowserHiddenTokens = (hiddenTokens) => {
+    try { window.localStorage.setItem(BROWSER_HIDDEN_TOKENS_KEY, JSON.stringify(hiddenTokens || {})) }
+    catch (error) { console.warn('Failed to persist hidden token preferences:', error) }
+}
+
+
+const isBrowserMode = () => !window?.electron?.loadFile
+
+const browserLoadConfig = () => {
+    try {
+        return window.localStorage.getItem(BROWSER_CONFIG_KEY)
+    } catch (err) {
+        console.error('Failed to read browser config:', err)
+        return null
+    }
+}
+
+const browserSaveConfig = (value) => {
+    try {
+        window.localStorage.setItem(BROWSER_CONFIG_KEY, value)
+        return true
+    } catch (err) {
+        console.error('Failed to save browser config:', err)
+        return false
+    }
+}
+
+const browserDeleteConfig = () => {
+    try {
+        window.localStorage.removeItem(BROWSER_CONFIG_KEY)
+        return true
+    } catch (err) {
+        console.error('Failed to delete browser config:', err)
+        return false
+    }
+}
+
 export const initData = async (key) => {
     const dataToSave = JSON.stringify(defaultContext)
     const encrypted = key ? await encryptWithHashedKey(key, dataToSave) : dataToSave
-    const saved = await window.electron.saveFile('config.json', encrypted)
-    console.log('Config Initialized')
+    const saved = isBrowserMode()
+        ? browserSaveConfig(encrypted)
+        : await window.electron.saveFile('config.json', encrypted)
     return saved
 }
 
 export const isKeyCorrect = async (key) => {
-    const response = await window.electron.loadFile('config.json')
+    const response = isBrowserMode()
+        ? browserLoadConfig()
+        : await window.electron.loadFile('config.json')
     if (response) {
         try {
             const decrypted = await decryptWithHashedKey(key, response)
@@ -85,14 +135,17 @@ export const AppContextProvider = ({ children }) => {
         const dataToSave = JSON.stringify(saveData)
         if (newKey || newKey === '') {
             const encrypted = newKey === '' ? dataToSave : await encryptWithHashedKey(newKey, dataToSave)
-            const saved = await window.electron.saveFile('config.json', encrypted)
+            const saved = isBrowserMode()
+                ? browserSaveConfig(encrypted)
+                : await window.electron.saveFile('config.json', encrypted)
             setKey(newKey)
         } else {
             const encrypted = key ? await encryptWithHashedKey(key, dataToSave) : dataToSave
-            const saved = await window.electron.saveFile('config.json', encrypted)
+            const saved = isBrowserMode()
+                ? browserSaveConfig(encrypted)
+                : await window.electron.saveFile('config.json', encrypted)
         }
         
-        console.log('File saved')
     }
 
     const loadDataUnencrypted = async (fileName) => {
@@ -115,9 +168,27 @@ export const AppContextProvider = ({ children }) => {
     const saveDataUnencrypted = async (saveData, fileName) => {
         if (fileName == 'config') return
 
+        // v2.4.3 cleanup: tokenRef is a large, rebuildable image cache. In browser
+        // mode it can exceed the origin's localStorage quota and is not needed for
+        // persistence because it is fetched again when required. Electron can still
+        // keep tokenRef.json on disk as before.
+        if (isBrowserMode() && fileName === 'tokenRef') return
+
         const dataToSave = JSON.stringify(saveData)
-        const saved = await window.electron.saveFile(`${fileName}.json`, dataToSave)
-        console.log('File saved')
+
+        // V196: the localhost/Vite test renderer does not have Electron's preload
+        // bridge. Persist auxiliary JSON in localStorage there instead of calling
+        // window.electron.saveFile and generating unhandled promise rejections.
+        if (isBrowserMode()) {
+            try {
+                window.localStorage.setItem(`pulsechain-dashboard-${fileName}`, dataToSave)
+            } catch (err) {
+                console.warn(`Failed to save browser ${fileName} cache:`, err)
+            }
+            return
+        }
+
+        await window.electron.saveFile(`${fileName}.json`, dataToSave)
     }
 
     const saveNewKey = async (newKey) => {
@@ -126,33 +197,68 @@ export const AppContextProvider = ({ children }) => {
 
     const eraseData = async () => {
         try {
-            await window.electron.deleteFile('config.json')
+            // Remove the persisted app config first. Electron stores this separately
+            // from renderer web storage, so both layers must be cleared.
+            if (isBrowserMode()) {
+                browserDeleteConfig()
+            } else {
+                await window.electron.deleteFile('config.json')
+            }
+
+            // DCA/P&L/history caches live in renderer localStorage in BOTH the web
+            // build and Electron. Leaving these behind makes a freshly-added wallet
+            // appear to calculate instantly from stale results.
+            try { window.localStorage.clear() } catch (err) { console.warn('Could not clear localStorage:', err) }
+            try { window.sessionStorage.clear() } catch (err) { console.warn('Could not clear sessionStorage:', err) }
+
+            // Clear the app IndexedDB store as well. This is mainly used by the web
+            // fallback, but clearing it here keeps "Erase All Data" deterministic.
+            try {
+                await new Promise((resolve) => {
+                    const request = window.indexedDB?.deleteDatabase?.('plsdashboard')
+                    if (!request) return resolve()
+                    request.onsuccess = () => resolve()
+                    request.onerror = () => resolve()
+                    request.onblocked = () => resolve()
+                })
+            } catch (err) {
+                console.warn('Could not clear IndexedDB:', err)
+            }
+
+            // Remove any browser Cache Storage entries created for this origin.
+            try {
+                if (window.caches?.keys) {
+                    const names = await window.caches.keys()
+                    await Promise.all(names.map(name => window.caches.delete(name)))
+                }
+            } catch (err) {
+                console.warn('Could not clear Cache Storage:', err)
+            }
+
             setData(defaultContext)
             setUpdate(prev => prev + 1)
-            console.log('Data erased')
+            return true
         } catch (error) {
             console.error('Error erasing data:', error)
+            return false
         }
     }
 
     const loadData = async () => {
-    if (!window.electron?.loadFile) {
-        console.log('Browser mode: skipping electron file load')
-        setData(defaultContext)
-        setUpdate(1)
-        return
-    }
-
-    const response = await window.electron.loadFile('config.json')
+    const browserMode = isBrowserMode()
+    const response = browserMode
+        ? browserLoadConfig()
+        : await window.electron.loadFile('config.json')
 
     let imgRef = undefined
-    try {
-        const tokenRefResponse = await window.electron.loadFile('tokenRef.json')
-        if (tokenRefResponse) {
-            imgRef = JSON.parse(tokenRefResponse ?? '{}')
+    if (!browserMode) {
+        try {
+            const tokenRefResponse = await window.electron.loadFile('tokenRef.json')
+            if (tokenRefResponse) {
+                imgRef = JSON.parse(tokenRefResponse ?? '{}')
+            }
+        } catch {
         }
-    } catch {
-        console.log('No tokenRef file found')
     }
 
     if (response) {
@@ -165,6 +271,7 @@ export const AppContextProvider = ({ children }) => {
 
             const migratedData = {
                 ...parsedData,
+                ...(browserMode ? { hiddenTokens: { ...(parsedData?.hiddenTokens || {}), ...readBrowserHiddenTokens() } } : {}),
                 settings: migrateSettings(parsedData?.settings),
                 imageRef: imgRef ?? {}
             }
@@ -179,7 +286,6 @@ export const AppContextProvider = ({ children }) => {
             console.error('Failed to parse config.json', err)
         }
     } else {
-        console.log('No data found')
         setData(defaultContext)
     }
 
@@ -263,30 +369,36 @@ export const AppContextProvider = ({ children }) => {
         setUpdate(prev => prev + 1)
     }
 
+    // A manually removed, auto-discovered token must remain hidden after reload.
+    // The watchlist entry alone is insufficient: discovery repopulates it on startup.
+    const tokenAddressFromEntry = (entry) => {
+        const wpls = '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
+        const a = String(entry?.token0?.id ?? '').toLowerCase()
+        const b = String(entry?.token1?.id ?? '').toLowerCase()
+        return a === wpls ? b : b === wpls ? a : String(entry?.token?.address ?? (a || b)).toLowerCase()
+    }
+
     const toggleWatchlist = (watchlistData) => {
-        if (!watchlistData?.id) return; // Ensure id is valid
-
+        if (!watchlistData?.id) return
         setData(prev => {
-            if (prev?.watchlist?.[watchlistData.id]?.id) {
-                const clone = {...prev}
-                delete clone.watchlist[watchlistData.id]
-                saveData(clone)
-                return clone
+            const id = String(watchlistData.id).toLowerCase()
+            const existing = prev?.watchlist?.[id]
+            const address = tokenAddressFromEntry(existing || watchlistData)
+            const watchlist = { ...(prev?.watchlist || {}) }
+            const hiddenTokens = { ...(prev?.hiddenTokens || {}) }
+            if (existing?.id && !hiddenTokens[address]) {
+                // Preserve the original pair entry for an immediate one-click restore.
+                // Hidden entries are filtered from display but remain available to P&L.
+                if (address) hiddenTokens[address] = true
+            } else {
+                watchlist[id] = watchlistData
+                if (address) delete hiddenTokens[address]
             }
-
-            const prevWatchlist = prev?.watchlist ?? {}
-            const newData = {
-                ...prev,
-                watchlist: {
-                    ...prevWatchlist,
-                    [watchlistData.id.toLowerCase()]: watchlistData
-                }
-            }
-
-            saveData(newData)
-            return newData
+            const next = { ...prev, watchlist, hiddenTokens }
+            if (isBrowserMode()) persistBrowserHiddenTokens(hiddenTokens)
+            saveData(next)
+            return next
         })
-
         setUpdate(prev => prev + 1)
     }
 
@@ -302,6 +414,7 @@ export const AppContextProvider = ({ children }) => {
                 }
             }
 
+            if (isBrowserMode()) persistBrowserHiddenTokens(newData.hiddenTokens)
             saveData(newData)
             return newData
         })
@@ -321,6 +434,7 @@ export const AppContextProvider = ({ children }) => {
                 hiddenTokens: newHiddenTokens
             }
 
+            if (isBrowserMode()) persistBrowserHiddenTokens(newHiddenTokens)
             saveData(newData)
             return newData
         })
@@ -335,6 +449,7 @@ export const AppContextProvider = ({ children }) => {
                 hiddenTokens: {}
             }
 
+            if (isBrowserMode()) persistBrowserHiddenTokens({})
             saveData(newData)
             return newData
         })
@@ -352,7 +467,7 @@ export const AppContextProvider = ({ children }) => {
 
             watchlistDataArray.forEach(watchlistData => {
                 const id = String(watchlistData?.id ?? '').toLowerCase()
-                if (!id || newWatchList[id]?.id) return
+                if (!id || newWatchList[id]?.id || prev?.hiddenTokens?.[tokenAddressFromEntry(watchlistData)]) return
                 newWatchList[id] = watchlistData
                 changed = true
             })
@@ -367,31 +482,29 @@ export const AppContextProvider = ({ children }) => {
     }
 
     const massToggleWatchlist = (watchlistDataArray) => {
-        if (!Array.isArray(watchlistDataArray) || watchlistDataArray.length === 0) return;
-
+        if (!Array.isArray(watchlistDataArray) || watchlistDataArray.length === 0) return
         setData(prev => {
-            const newWatchList = { ...(prev?.watchlist ?? {}) }
-            
-            // Process all items in the array
-            watchlistDataArray.forEach(watchlistData => {
-                if (!watchlistData?.id) return; // Skip invalid entries
-                
-                if (prev?.watchlist?.[watchlistData?.id.toLowerCase()]?.id) {
-                    // Remove if exists
-                    delete newWatchList[watchlistData.id];
+            const watchlist = { ...(prev?.watchlist || {}) }
+            const hiddenTokens = { ...(prev?.hiddenTokens || {}) }
+            watchlistDataArray.forEach(entry => {
+                const id = String(entry?.id || '').toLowerCase()
+                if (!id) return
+                const address = tokenAddressFromEntry(watchlist[id] || entry)
+                if (watchlist[id]?.id && !hiddenTokens[address]) {
+                    // Keep the pair in the watchlist data for cache and one-click restore.
+                    if (address) hiddenTokens[address] = true
                 } else {
-                    // Add if doesn't exist
-                    newWatchList[watchlistData?.id.toLowerCase()] = watchlistData;
+                    watchlist[id] = entry
+                    if (address) delete hiddenTokens[address]
                 }
-            });
-
-            const newData = { ...prev, watchlist: newWatchList }
-            saveData(newData)
-            return newData;
-        });
-        
+            })
+            const next = { ...prev, watchlist, hiddenTokens }
+            if (isBrowserMode()) persistBrowserHiddenTokens(hiddenTokens)
+            saveData(next)
+            return next
+        })
         setUpdate(prev => prev + 1)
-    };
+    }
 
     const toggleWallet = (address) => {
         // Add logic to ensure its a valid ethereum address here

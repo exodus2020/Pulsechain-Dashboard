@@ -12,6 +12,8 @@ export default function useGetBalance(priceData) {
     const [balances, setBalances] = useState({})
     const [combinedBalances, setCombinedBalances] = useState({})
     const fetching = useRef(false)
+    const pendingRefresh = useRef(false)
+    const latestFetch = useRef(null)
     const loading = fetching.current
 
     const context = useAppContext()
@@ -22,7 +24,11 @@ export default function useGetBalance(priceData) {
     const readyForFirstUpdate = priceData.initialized && Object.keys(priceData.prices).length > 0
 
     const fetchBalances = useCallback(async () => {
-        if (fetching.current === true) return
+        if (fetching.current === true) {
+            // Watchlist/wallet changes during an in-flight query must not be lost.
+            pendingRefresh.current = true
+            return
+        }
         fetching.current = true
         
         try {
@@ -65,8 +71,15 @@ export default function useGetBalance(priceData) {
             console.error('Error fetching balances:', error)
         } finally {
             fetching.current = false
+            if (pendingRefresh.current) {
+                pendingRefresh.current = false
+                // Use the newest wallet/watchlist closure, not the completed request's snapshot.
+                Promise.resolve().then(() => latestFetch.current?.())
+            }
         }
     }, [wallets, watchlist, settings, prices])
+
+    latestFetch.current = fetchBalances
 
     // Track changes to trigger updates
     useEffect(() => {

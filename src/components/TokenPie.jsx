@@ -1,6 +1,6 @@
 // TokenPie.jsx
 import { memo, useMemo, useState, useEffect, useRef } from 'react';
-import { PieChart, Pie, Cell, Tooltip, Sector, Legend } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, Sector } from 'recharts';
 import styled from 'styled-components';
 import { fUnit } from '../lib/numbers';
 import { shortenString } from '../lib/string';
@@ -207,7 +207,7 @@ const TokenPieChart = memo(function TokenPieChart({ balances, aliases = {} }) {
 
     {chartData.length > 0 && (
         <div style={{ width: '100%', height: 250 }}>
-          <PieChart width={window.innerWidth <= 650 ? Math.max(300, window.innerWidth - 100) : 560} height={250}>
+          <PieChart width={window.innerWidth <= 650 ? Math.max(280, window.innerWidth - 100) : 420} height={250}>
             <Pie
               data={chartData}
               cx="50%"
@@ -223,21 +223,6 @@ const TokenPieChart = memo(function TokenPieChart({ balances, aliases = {} }) {
                 <Cell key={`cell-${index}`} fill={getColor(index)} />
               ))}
             </Pie>
-
-            <Legend
-              layout="vertical"
-              verticalAlign="middle"
-              align="right"
-              wrapperStyle={{ color: 'white', fontSize: '12px' }}
-              formatter={(value, entry) =>
-                entry?.payload?.address
-                  ? `${shortenString(
-                      aliases[entry.payload.address.toLowerCase()] ??
-                      entry.payload.address
-                    )} - $${fUnit(parseFloat(entry.payload.balanceUsd), 0)}`
-                  : 'Unknown'
-              }
-            />
 
             <Tooltip content={<CustomTooltipContent />} />
           </PieChart>

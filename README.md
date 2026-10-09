@@ -1,8 +1,44 @@
 # 🚀 PulseChain Dashboard
 
-Privacy-first PulseChain portfolio tracker with real-time pricing, historical cost basis, P&L analytics, HEX staking, liquidity tracking, and multi-wallet support.
+Privacy-first PulseChain portfolio tracker for Windows and the web, with real-time pricing, historical cost basis, P&L analytics, HEX staking, liquidity tracking, and multi-wallet support.
 
-> Built for privacy. Runs locally. No tracking. No middlemen.
+> Built for privacy. Track your wallets on desktop or at **https://pulsechain-dashboard.com/**.
+
+## 🚀 v2.4.3 — Web Launch, Watchlist Stability & Portfolio Polish
+
+Version 2.4.3 brings the PulseChain Dashboard to the browser and improves token discovery, watchlist reliability, pricing, and portfolio display.
+
+### 🌐 Official Website
+
+**Use the dashboard in your browser:** **https://pulsechain-dashboard.com/**
+
+The web edition runs through a WordPress-hosted application; no Windows download is required. Wallet selection and dashboard preferences are stored in the browser. Desktop and browser installations have separate local data stores.
+
+### 🪙 Watchlist & Token Discovery
+- Hidden tokens remain hidden after refresh and can be restored from the Add list in one action.
+- Restored tokens retain their underlying watchlist information and display their balance and available P&L without requiring a second addition.
+- Wallet-based token filtering keeps irrelevant tokens out of the watchlist when wallets are selected.
+- Improved portfolio P&L restoration from existing cache when watchlist visibility changes, avoiding unnecessary full history rescans.
+
+### 📈 Charts, Pricing & Dashboard Fixes
+- Corrected Wrapped PLS display to reflect the 1:1 WPLS-to-PLS relationship.
+- Improved historical token price charts and related portfolio calculations.
+- Fixed several web-specific price-change and token-display inconsistencies.
+- Improved dashboard favicon and removed temporary debug controls from the web release.
+- Improved desktop token-logo fallback behavior, including DexScreener image lookup for tokens whose primary logo source is unavailable. Some tokens may still have no available logo.
+
+### 🖥️ Windows Desktop Improvements
+- Improved external token-image loading in packaged Electron builds, including the portable and installed editions.
+- Improved compatibility of token-logo requests with the desktop application environment.
+
+### ⚙️ Web Infrastructure
+- Added server-side routing for API requests that browsers cannot reliably access directly.
+- Improved handling of GeckoTerminal and PulseCoinList API requests on the hosted website.
+- Preserved per-browser wallet and settings persistence.
+
+> **Desktop note:** The Windows installer and portable edition are separate Electron builds. Some items above are specific to the web edition. P&L and reconstructed cost basis are estimates, not tax records.
+
+---
 
 ## 🚀 v2.4.2 — HEX DCA Accuracy, Purchase Timeline & Portfolio Reliability
 
@@ -31,8 +67,7 @@ Version 2.4.2 is a major reliability and accuracy update for **HEX DCA/P&L, fres
 - Restored network-specific DCA information in the DCA tooltip.
 - Moved the DCA **Details** control beneath the DCA card and kept it persistent alongside HEX Miner Details.
 - Full or newly required DCA reconstruction once again exposes the **Scanning → Verifying → Calculating** workflow instead of silently rebuilding in the background.
-- Adding a new wallet now triggers visible DCA progress when that wallet requires new historical data, while already cached wallets remain reusable.
-- New-wallet rebuilds display the same detailed **Scanning → Verifying → Calculating** status information used during a cold-cache reconstruction, including scan progress beneath the DCA card.
+- Adding a new wallet can trigger visible DCA progress when that wallet requires new historical data, while already cached wallets remain reusable.
 
 ### ⚡ Persistent & Incremental HEX DCA Cache
 - HEX purchase history is saved persistently after a completed historical reconstruction.
@@ -60,7 +95,6 @@ Version 2.4.2 is a major reliability and accuracy update for **HEX DCA/P&L, fres
 - Purchase-history Details and HEX Miner Details can remain independently open/available without hiding one another's controls.
 - Refined chart spacing, bar widths, scaling, labels, and hover behavior for easier visual comparison across long wallet histories.
 - Prevented temporary/incomplete DCA reconstruction states from being mistaken for the final reconstructed cost basis once the scan completes.
-- Improved progress-state consistency when adding uncached wallets after DCA data has already been restored from cache.
 
 ### 📸 HEX Purchase History
 
@@ -333,6 +367,12 @@ This patch improves startup reliability and fixes INC/day farm reward estimates.
 ---
 
 
+## 🌐 Website
+
+**Launch PulseChain Dashboard online:** https://pulsechain-dashboard.com/
+
+---
+
 ## 📦 Download
 
 👉 **Latest Release:**
@@ -344,7 +384,7 @@ https://github.com/exodus2020/Pulsechain-Dashboard/releases
 ⚠️ Notes:
 
 * This app is not code-signed yet
-* Windows may show a security warning → click **More Info → Run Anyway**
+* Windows may show a security warning for unsigned releases. Verify the download comes from the official GitHub releases page before deciding whether to run it.
 
 ---
 
@@ -352,7 +392,7 @@ https://github.com/exodus2020/Pulsechain-Dashboard/releases
 
 PulseChain Dashboard is an open-source desktop application that lets you track your PulseChain portfolio and interact with the ecosystem — without relying on centralized services.
 
-All data is stored locally and encrypted for maximum privacy.
+Portfolio preferences and cached information are stored locally in the desktop application or in your browser for the web edition. The dashboard retrieves public blockchain and pricing information from external services.
 
 ---
 
@@ -378,17 +418,18 @@ All data is stored locally and encrypted for maximum privacy.
 * 📁 Import / export encrypted portfolios
 * 🔧 Custom RPC endpoints
 * 🌐 Built-in PulseChain ecosystem dApp access
-* 🖥️ Cross-platform support (Windows, macOS, Linux)
+* 🖥️ Windows installer and portable editions; source may be adapted for other platforms
 ---
 
 ## 🛠️ Run from Source
 
 ### Prerequisites
 
-* Node.js (v16+)
-* npm (v7+)
+* Node.js 22.12+ (compatible with the current Vite 8 toolchain)
+* npm (bundled with Node.js)
 * Git
-* Python (v3.7+) + pip (for build dependencies)
+* Python 3.11 or newer, with pip (for native build dependencies)
+* On Windows, Visual Studio C++ Build Tools may be required for native modules
 
 Install Python dependencies:
 
@@ -468,8 +509,8 @@ pip3 install setuptools wheel
 
 PulseChain Dashboard is designed with privacy as a core principle:
 
-* All data is stored locally
-* No external tracking or analytics
+* Wallet addresses, preferences, and cached portfolio data are stored locally for the desktop app or in browser storage for the web edition
+* Public blockchain and market-data requests use external RPC and API providers
 * User-controlled RPC endpoints
 * dApps loaded from official sources only
 

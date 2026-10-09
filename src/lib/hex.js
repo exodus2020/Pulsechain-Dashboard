@@ -1,4 +1,4 @@
-import Web3 from 'web3'
+import Web3 from './web3Vendor.js'
 import { hexAbi } from './abi/hex-abi'
 import { hexInstanceAbi } from './abi/hex-instance-abi'
 import { defaultSettings } from '../config/settings'

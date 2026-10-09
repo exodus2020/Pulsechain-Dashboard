@@ -1,7 +1,7 @@
 //farms.js
 import { poolsAbi, lplAbi, poolsAddress } from './abi/pools'
 import { defaultSettings } from '../config/settings'
-import Web3 from 'web3'
+import Web3 from './web3Vendor.js'
 
 export const fetchPoolInfo = async (settings = defaultSettings) => {
     try {

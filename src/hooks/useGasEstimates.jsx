@@ -1,12 +1,9 @@
 // useGasEstimates.jsx
 import { useState, useEffect } from "react";
-import { ethers } from "ethers";
 import { defaultSettings } from "../config/settings";
 
-// V155: the previous @pulsechainorg/gas-estimation helper occasionally asked
-// eth_feeHistory for a block just beyond the RPC head, then printed noisy retry
-// warnings. The dashboard only needs a current fee estimate, so use ethers'
-// provider-native fee data and fall back quietly to eth_gasPrice.
+// Browser-safe PulseChain gas estimate. Keep the legacy slow/normal/instant
+// shape because LeftNavigation displays slow.baseFee.
 export const useGasEstimates = (settings = defaultSettings) => {
   const [estimatedFees, setEstimatedFees] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -15,21 +12,38 @@ export const useGasEstimates = (settings = defaultSettings) => {
 
   useEffect(() => {
     let cancelled = false;
+
+    const rpc = async (method, params = []) => {
+      const response = await fetch(providerURL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        cache: 'no-store'
+      });
+      if (!response.ok) throw new Error(`RPC HTTP ${response.status}`);
+      const json = await response.json();
+      if (json?.error) throw new Error(json.error.message || 'RPC error');
+      return json?.result;
+    };
+
     const fetchGasEstimates = async () => {
       if (!cancelled) { setLoading(true); setError(null); }
       try {
-        const provider = new ethers.providers.JsonRpcProvider(providerURL);
-        let feeData = await provider.getFeeData();
-        let gasPrice = feeData?.gasPrice || feeData?.maxFeePerGas;
-        if (!gasPrice) gasPrice = await provider.getGasPrice();
-        const base = gasPrice || ethers.BigNumber.from(0);
+        let weiHex;
+        try {
+          const block = await rpc('eth_getBlockByNumber', ['latest', false]);
+          weiHex = block?.baseFeePerGas;
+        } catch {}
+        if (!weiHex) weiHex = await rpc('eth_gasPrice');
+        if (!weiHex) throw new Error('No gas price returned');
+
+        const wei = BigInt(weiHex);
+        const gwei = Number(wei) / 1e9;
         const result = {
-          low: base.mul(90).div(100).toString(),
-          medium: base.toString(),
-          high: base.mul(120).div(100).toString(),
-          gasPrice: base.toString(),
-          maxFeePerGas: feeData?.maxFeePerGas?.toString?.() || base.toString(),
-          maxPriorityFeePerGas: feeData?.maxPriorityFeePerGas?.toString?.() || '0'
+          slow: { baseFee: gwei },
+          normal: { baseFee: gwei * 1.2 },
+          instant: { baseFee: gwei * 1.25 },
+          gasPrice: wei.toString()
         };
         if (!cancelled) setEstimatedFees(result);
       } catch (err) {
@@ -38,6 +52,7 @@ export const useGasEstimates = (settings = defaultSettings) => {
         if (!cancelled) setLoading(false);
       }
     };
+
     fetchGasEstimates();
     const interval = setInterval(fetchGasEstimates, 30_000);
     return () => { cancelled = true; clearInterval(interval); };

@@ -67,7 +67,7 @@ const ChartWrapper = styled.div`
     .x-axis {
         position: absolute;
         left: 80px;
-        right: 10px;
+        right: 20px;
         bottom: 0;
         height: 20px;
         display: flex;
@@ -89,6 +89,7 @@ function BasicChart({
     xAxisLabel,
     yAxisLabel,
     xInterval = 6,
+    dayGridInterval = 30,
     yInterval = 5,
     showDataLabels = false,
     dataLabelInterval = 10,
@@ -208,6 +209,17 @@ function BasicChart({
         pingFrameRef.current = requestAnimationFrame(pingAnimation)
     }
 
+    const xTicks = React.useMemo(() => {
+        if (data.length < 2) return []
+        const first = Number(data[0][xKey])
+        const last = Number(data[data.length - 1][xKey])
+        const step = dayGridInterval * 86400000
+        if (!Number.isFinite(first) || !Number.isFinite(last) || last <= first) return []
+        const ticks = []
+        for (let t = last - step; t > first; t -= step) ticks.unshift(t)
+        return ticks
+    }, [data, xKey, dayGridInterval])
+
     useEffect(() => {
         if (!data.length || !canvasRef.current) return
 
@@ -279,9 +291,9 @@ function BasicChart({
             ? Math.max(1, Math.floor(data.length / 6))
             : Math.max(1, Number(xInterval) || 1)
 
-        // Vertical grid lines
-        for (let i = 0; i < data.length; i += adjustedXInterval) {
-            const x = scaleX(data[i][xKey])
+        // Vertical grid lines share exact timestamps with the x-axis labels.
+        for (const tick of xTicks) {
+            const x = scaleX(tick)
             ctx.moveTo(x, margin.top)
             ctx.lineTo(x, height - margin.bottom)
         }
@@ -338,7 +350,7 @@ function BasicChart({
         ctx.lineTo(width - margin.right, height - margin.bottom)
         ctx.stroke()
 
-    }, [data, width, height, xKey, yKey, animationProgress, pingRadius])
+    }, [data, width, height, xKey, yKey, animationProgress, pingRadius, xTicks])
 
     // Animation disabled while stabilizing renderer
     useEffect(() => {
@@ -425,9 +437,7 @@ function BasicChart({
     }
 
     // Calculate x-axis labels
-    const xLabels = data
-        .filter((_, i) => i % xInterval === 0)
-        .map(d => formatTime(d[xKey]))
+    const xLabels = xTicks.map(t => ({ timestamp: t, label: formatTime(t) }))
 
     return (
         <ChartWrapper
@@ -460,8 +470,8 @@ function BasicChart({
                 {yAxisLabel && <div className="axis-label">{yAxisLabel}</div>}
             </div>
             <div className="x-axis">
-                {xLabels.map((label, i) => (
-                    <div key={i}>{label}</div>
+                {xLabels.map(({timestamp, label}) => (
+                    <div key={timestamp} style={{ position: "absolute", left: `${((timestamp - Number(data[0][xKey])) / Math.max(1, Number(data[data.length - 1][xKey]) - Number(data[0][xKey]))) * 100}%`, transform: "translateX(-50%)", whiteSpace: "nowrap" }}>{label}</div>
                 ))}
                 {xAxisLabel && <div className="axis-label">{xAxisLabel}</div>}
             </div>

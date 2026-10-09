@@ -1,5 +1,5 @@
 // HistoryChart.jsx
-import { memo, useMemo, useState } from "react"
+import { memo, useMemo, useState, useRef } from "react"
 import BasicChart from "./BasicChart"
 import Button from "./Button"
 import LoadingWave from "./LoadingWave"
@@ -23,6 +23,8 @@ export default memo(HistoryChart)
 function HistoryChart({ historyData, pairAddress, pairInfo, tokenAddress, bestStable }) {
     const { history, dailyCandles, getHistory, getChartHistory, fetchDailyCandles, fetchMore, isLoading, isError, progress, chartKeyPoints } = historyData
     const [ selected, setSelected ] = useState('USD')
+    const requestedPair = useRef(null)
+    const [chartLoadError, setChartLoadError] = useState('')
     
     const stableLpAddress = bestStable?.pair
     const wplsHistory = dailyCandles?.[stableLpAddress] ?? []
@@ -61,21 +63,26 @@ function HistoryChart({ historyData, pairAddress, pairInfo, tokenAddress, bestSt
     }
 
     const handleLoadPriceChart = () => {
-        if (isLoading || dataExists) return
-
-        if (!pairAddress) return
-
-        // 🔥 ALWAYS try candles first
-        fetchDailyCandles(pairAddress)
+        if (!pairAddress || dataExists) return
+        setChartLoadError('')
+        Promise.resolve(fetchDailyCandles(pairAddress)).then(data => {
+            if (data?.error) setChartLoadError(data.error)
+            else if (Array.isArray(data) && data.length === 0) setChartLoadError('No historical candles are available for this pool.')
+        }).catch(error => setChartLoadError(error?.message || 'Unable to load price history.'))
     }
-        useEffect(() => {
-            if (!pairAddress) return
-
-            // only fetch if we truly have no usable data
-            if (!pairDailyCandles.length) {
-                fetchDailyCandles(pairAddress)
-            }
-        }, [pairAddress, pairDailyCandles.length])
+    useEffect(() => {
+        if (!pairAddress || pairDailyCandles.length) return
+        // Request once per mounted chart. The hook updates dailyCandles state
+        // when the response arrives, so the chart redraws without reopening.
+        if (requestedPair.current !== pairAddress) {
+            requestedPair.current = pairAddress
+            setChartLoadError('')
+            Promise.resolve(fetchDailyCandles(pairAddress)).then(data => {
+                if (data?.error) setChartLoadError(data.error)
+                else if (Array.isArray(data) && data.length === 0) setChartLoadError('No historical candles are available for this pool.')
+            }).catch(error => setChartLoadError(error?.message || 'Unable to load price history.'))
+        }
+    }, [pairAddress, pairDailyCandles.length, fetchDailyCandles])
 
     const { formattedChartData, formattedPercentageChange } = useMemo(() => {
         const percChange = [...(chartKeyPoints?.[pairAddress] ?? [])].sort((a, b) => b.timestamp - a.timestamp)
@@ -173,8 +180,8 @@ function HistoryChart({ historyData, pairAddress, pairInfo, tokenAddress, bestSt
                     data={formattedChartData}
                     xKey="timestamp"
                     yKey="price"
-                    width={700}
-                    height={400}
+                    width={660}
+                    height={340}
                     lineColor="#00ff00"
                     xInterval={Math.max(1, Number(2 * (calculateScaledResultForChart(chartData.length) ?? 5)) || 1)}
                     yInterval={5}
@@ -189,7 +196,10 @@ function HistoryChart({ historyData, pairAddress, pairInfo, tokenAddress, bestSt
                     alignItems: 'center',
                     justifyContent: 'center'
                 }}>
-                    <LoadingWave numDots={5} speed={100}/>
+                    {chartLoadError ? <div style={{textAlign: 'center', padding: 20}}>
+                        <div style={{marginBottom: 12}}>{chartLoadError}</div>
+                        <Button onClick={handleLoadPriceChart} textAlign='center'>Retry Price History</Button>
+                    </div> : <LoadingWave numDots={5} speed={100}/>}
                 </div>
             )}
             {/* <div style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '40px', backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>

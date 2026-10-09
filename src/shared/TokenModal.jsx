@@ -56,7 +56,10 @@ const ModalContent = styled.div`
   position: absolute;
   top: 50%; left: 50%;
   transform: translateX(-50%) translateY(-50%);
-  max-height: 80%; width: 500px;
+  max-height: min(94dvh, 940px); width: 500px;
+  @media (min-width: 651px) {
+    &:has(.history-chart-container-2) { width: min(720px, 94vw); }
+  }
   background: rgb(50,50,50);
   border-radius: 15px;
   z-index: 1000;
@@ -165,6 +168,8 @@ function TokenModal({ balanceData, historyData, bestStable }) {
     context?.data?.watchlist?.[m?.pairId?.toLowerCase()] ||
     context?.data?.watchlist?.[address?.toLowerCase()]
 
+  const isWrappedPls = address === '0xa1077a294dde1b09bb078844df40758a5d0f9a27'
+  const displayPricePls = isWrappedPls ? '1' : addCommasToNumber(parseFloat(m.priceWpls).toFixed(Number(m.priceWpls) < 2 ? 4 : 0))
   const displayPriceUsd = formatNumber(m?.priceUsd ?? 0, true, true)
   const [pools, setPools] = useState(false)
 
@@ -199,21 +204,21 @@ function TokenModal({ balanceData, historyData, bestStable }) {
   return (
     <ModalWrapper>
       <ModalContent>
-        <div style={{ overflowY: 'auto' }}>
+        <div style={{ overflowY: 'auto', maxHeight: 'min(94dvh, 940px)' }}>
           <div className="modal-header">
               <ImageContainer source={image} size={24}/> {name}
               <button className="close-button" onClick={() => setModal(null)}>
                 X
               </button>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '20px 40px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '16px 30px' }}>
             <div>
-              <div style={{ marginBottom: 40 }}>
+              <div style={{ marginBottom: showHistory ? 25 : 40 }}>
                 <div style={{ marginBottom: 10 }}>Price</div>
                 <div style={{ fontSize: 24, fontWeight: 800 }}>
                   $ {displayPriceUsd}
                   {/* {m.priceUsd > 0.98 ? parseFloat(m.priceUsd).toFixed(2) : m.priceUsd} */}
-                  <br/><span style={{ fontSize: 14, fontWeight: 400 }}>{addCommasToNumber(parseFloat(m.priceWpls).toFixed(Number(m.priceWpls) < 2 ? 4 :0))} PLS</span>
+                  <br/><span style={{ fontSize: 14, fontWeight: 400 }}>{displayPricePls} PLS</span>
                 </div>
               </div>
 
@@ -261,7 +266,7 @@ function TokenModal({ balanceData, historyData, bestStable }) {
                 </div>
               </div>
               
-              <div style={{ marginTop: 40,marginBottom: 10 }}/>
+              <div style={{ marginTop: showHistory ? 12 : 40,marginBottom: 10 }}/>
               {!isInstalled ?<div style={{ textAlign: 'center' }}>
                 <div>PulseX has not been downloaded.</div>
                 <div style={{ marginBottom: 10, marginTop: 10 }}>Download PulseX to view this token locally</div>
@@ -272,7 +277,8 @@ function TokenModal({ balanceData, historyData, bestStable }) {
                   Download PulseX
                 </Button>
               </div> 
-                : <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                : <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'start' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <Button style={{ maxHeight: 33}} onClick={() => {
                     if(isInstalled) launchDapp(`token/${address}`)
                     if(!isInstalled) {
@@ -280,10 +286,23 @@ function TokenModal({ balanceData, historyData, bestStable }) {
                       setModal(false)
                     }
                   }} textAlign='center'>
-                  {isLoading ? 'Loading...' : 
-                   isInstalled ? 'View Token on PulseX' : 
-                   'View Token on PulseX'}
+                  {isLoading ? 'Loading...' : 'View Token on PulseX'}
                 </Button>
+                <Button
+                  style={{ maxHeight: 33 }}
+                  onClick={() => {
+                    if (isDefaultToken) {
+                      context?.hideToken?.(address)
+                    } else {
+                      context?.toggleWatchlist(watchlistData || m)
+                    }
+                    setModal(null)
+                  }}
+                  textAlign='center'
+                >
+                  {isDefaultToken ? 'Hide Token' : 'Remove from List'}
+                </Button>
+                </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {!pools && <div style={{ textAlign: 'center', paddingTop: 5 }}>Checking Pools...</div>}
                   {pools && pools.map((m, i) => {
@@ -294,30 +313,12 @@ function TokenModal({ balanceData, historyData, bestStable }) {
                           setModal(false)
                         }
                       }} textAlign='center'>
-                      {isLoading ? 'Loading...' : 
-                      isInstalled ? `${m.version} Pool: ${shortenString(m.pairId)}` : 
-                      `${m.version} Pool: ${shortenString(m.pairId)}`}
+                      {`${m.version} Pool: ${shortenString(m.pairId)}`}
                     </Button>
                   })}
                 </div>
-              </div>}
-              <div style={{ marginTop: 10 }}>
-                <Button
-                  style={{ width: 180, textAlign: 'center', display: 'inline-block'}}
-                  onClick={() => {
-                    if (isDefaultToken) {
-                      // Hide default token instead of toggling watchlist
-                      context?.hideToken?.(address)
-                    } else {
-                      context?.toggleWatchlist(watchlistData || m)
-                    }
 
-                    setModal(null)
-                  }}
-                >
-                  {isDefaultToken ? 'Hide Token' : 'Remove from List'}
-                </Button>
-              </div>
+              </div>}
             </div>
           </div>
         </div>

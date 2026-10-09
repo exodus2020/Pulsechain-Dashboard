@@ -1,74 +1,81 @@
 {
-  "name": "pulsechain-dashboard",
-  "version": "2.4.2",
-  "main": "./src/main.js",
-  "author": "",
-  "license": "ISC",
-  "description": "Privacy-first PulseChain portfolio tracker",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "electron:build": "vite build && electron-builder",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "@pulsechainorg/gas-estimation": "^1.1.7",
-    "axios": "^1.7.9",
-    "call-bind": "^1.0.8",
-    "ethers": "^5.7.2",
-    "express": "^5.2.1",
-    "isomorphic-git": "^1.29.0",
-    "jotai": "^2.11.0",
-    "js-sha3": "^0.9.3",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "recharts": "^3.1.0",
-    "styled-components": "^6.1.13",
-    "typeface-raleway": "^1.1.13",
-    "web3": "^1.9.0"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^6.0.1",
-    "electron": "^41.3.0",
-    "electron-builder": "^26.8.1",
-    "vite": "^8.0.10",
-    "vite-plugin-electron": "^0.29.1",
-    "vite-plugin-svgr": "^5.2.0"
-  },
-  "build": {
-    "appId": "com.pulsechain-dashboard",
-    "productName": "PulseChain Dashboard",
-    "icon": "logo.ico",
-    "directories": {
-      "output": "dist_electron",
-      "buildResources": "src/icons"
+    "name": "pulsechain-dashboard",
+    "version": "2.4.3",
+    "main": "./src/main.js",
+    "author": "",
+    "license": "ISC",
+    "description": "Privacy-first PulseChain portfolio tracker",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "electron:build": "vite build && electron-builder",
+        "preview": "vite preview",
+        "postinstall": "patch-package"
     },
-    "files": [
-      "dist/**/*",
-      "src/main.js",
-      "src/preload.js",
-      "package.json"
-    ],
-    "portable": {
-      "artifactName": "${productName} ${version} Portable.${ext}"
+    "dependencies": {
+        "@pulsechainorg/gas-estimation": "^1.1.7",
+        "axios": "^1.7.9",
+        "call-bind": "^1.0.8",
+        "ethers": "^5.7.2",
+        "express": "^5.2.1",
+        "isomorphic-git": "^1.29.0",
+        "jotai": "^2.11.0",
+        "js-sha3": "^0.9.3",
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0",
+        "recharts": "^3.1.0",
+        "styled-components": "^6.1.13",
+        "typeface-raleway": "^1.1.13",
+        "web3": "file:./vendor/web3"
     },
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
+    "devDependencies": {
+        "@vitejs/plugin-react": "^6.0.1",
+        "electron": "^41.3.0",
+        "electron-builder": "^26.8.1",
+        "patch-package": "^8.0.1",
+        "vite": "^8.0.10",
+        "vite-plugin-electron": "^0.29.1",
+        "vite-plugin-svgr": "^5.2.0"
+    },
+    "build": {
+        "appId": "com.pulsechain-dashboard",
+        "productName": "PulseChain Dashboard",
+        "icon": "logo.ico",
+        "directories": {
+            "output": "dist_electron",
+            "buildResources": "src/icons"
         },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
+        "files": [
+            "dist/**/*",
+            "src/main.js",
+            "src/preload.js",
+            "package.json",
+            "!node_modules/swarm-js/node_modules/tar/**",
+            "!node_modules/tar/**"
+        ],
+        "portable": {
+            "artifactName": "${productName} ${version} Portable.${ext}"
+        },
+        "win": {
+            "target": [
+                {
+                    "target": "nsis",
+                    "arch": [
+                        "x64"
+                    ]
+                },
+                {
+                    "target": "portable",
+                    "arch": [
+                        "x64"
+                    ]
+                }
+            ],
+            "artifactName": "${productName} Setup ${version}.${ext}",
+            "icon": "logo.ico"
         }
-      ],
-      "artifactName": "${productName} Setup ${version}.${ext}",
-      "icon": "logo.ico"
+    },
+    "overrides": {
+    "ws": "^8.20.2"
     }
-  }
 }

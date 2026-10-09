@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { ethers } from "ethers"
 import {
     fetchCompleteAddressTokenTransfers,
@@ -22,6 +22,18 @@ const PRVX_SACRIFICE_END_BLOCK = 24450000
 const PRVX_SACRIFICE_CACHE_VERSION = 3
 const WPLS_WRAP_CACHE_VERSION = 4
 const PLS_NATIVE_CACHE_VERSION = 1
+
+// v2.4.3 diagnostic pass: keep P&L tracing out of the console, but retain a
+// small in-memory timeline that can be downloaded from the Wallets page.
+// This is diagnostic-only and does not change pricing/accounting behavior.
+const pnlDiagnostic = (event, details = {}) => {
+    try {
+        if (typeof window === "undefined") return
+        const rows = Array.isArray(window.__PULSE_PNL_DIAGNOSTIC__) ? window.__PULSE_PNL_DIAGNOSTIC__ : []
+        rows.push({ at: new Date().toISOString(), event, ...details })
+        window.__PULSE_PNL_DIAGNOSTIC__ = rows.slice(-1500)
+    } catch {}
+}
 
 // PRVX baseline cost-basis model. Assume every sacrifice distribution received
 // the best (maximum-return) allocation. Calibration supplied from a known
@@ -379,8 +391,17 @@ const fetchCompleteAddressInternalTransactions = async (wallet, settings, option
     const maxPages = Number(options.maxPages ?? 250)
     const rows = []
     const seen = new Set()
+    // Some Blockscout deployments can return the same next_page_params cursor
+    // repeatedly. Without a cursor guard the native-PLS reconstruction can walk
+    // all 250 safety pages and make WPLS appear permanently stuck at 39/40.
+    // Stop only when the *same pagination cursor* is seen again; normal unique
+    // pagination and all discovered transactions remain unchanged.
+    const seenPageCursors = new Set()
     let nextPageParams = null
     for (let page = 0; page < maxPages; page += 1) {
+        const cursorKey = JSON.stringify(nextPageParams ?? {})
+        if (page > 0 && seenPageCursors.has(cursorKey)) break
+        seenPageCursors.add(cursorKey)
         const base = String(scanApi).replace(/\/$/, '')
         const url = new URL(`${base}/v2/addresses/${normalizeAddress(wallet)}/internal-transactions`)
         Object.entries(nextPageParams ?? {}).forEach(([key, value]) => {
@@ -1392,6 +1413,15 @@ export default function useTokenPnl({
     const walletKey = allWalletAddresses.join("|")
     const visibleWalletKey = visibleWalletAddresses.join("|")
     const tokenKey = trackedTokens.join("|")
+    // A watchlist toggle should not restart a just-completed historical scan.
+    // Only reuse complete persisted wallet positions, and only briefly.
+    const lastCompletedScan = useRef({ walletKey: '', settingsKey: '', balanceKey: '', at: 0 })
+    const previousPnlInputs = useRef(null)
+    // Keep completed results available when a token is hidden and immediately re-added.
+    const aggregationScopeRef = useRef(null)
+    const walletPositionsRef = useRef(walletPositions)
+    walletPositionsRef.current = walletPositions
+
 
     // V32: aggregate already-computed wallet ledgers locally. No RPC/explorer work
     // is needed when the user changes which wallets are visible. Cost basis is
@@ -1447,7 +1477,13 @@ export default function useTokenPnl({
                 complete: parts.length === holderWallets.length && parts.every(p => p?.complete !== false)
             }
         }
-        setPositions(aggregated)
+        // A watchlist toggle changes tokenKey, not wallet holdings. Retain the
+        // previously computed rows so showing a token restores its P&L instantly.
+        // Discard that snapshot whenever the wallet selection or holdings change.
+        const scope = `${walletKey}|${visibleWalletKey}|${currentBalanceKey}`
+        const sameScope = aggregationScopeRef.current === scope
+        aggregationScopeRef.current = scope
+        setPositions(prev => sameScope ? { ...prev, ...aggregated } : aggregated)
     }, [walletPositions, visibleWalletKey, tokenKey, currentBalanceKey])
 
     useEffect(() => {
@@ -1518,7 +1554,73 @@ export default function useTokenPnl({
                     } catch {}
                 }
             }
-            if (Object.keys(warmWalletPositions).length > 0) setWalletPositions(warmWalletPositions)
+            if (Object.keys(warmWalletPositions).length > 0) {
+                // Preserve positions for other tokens while a watchlist item is toggled.
+                setWalletPositions(prev => {
+                    const merged = { ...prev }
+                    for (const [wallet, tokens] of Object.entries(warmWalletPositions)) {
+                        merged[wallet] = { ...(merged[wallet] ?? {}), ...tokens }
+                    }
+                    return merged
+                })
+            }
+
+            const settingsKey = JSON.stringify(settings ?? {})
+            const previous = previousPnlInputs.current
+            const watchlistOnlyChange = previous != null &&
+                previous.tokenKey !== tokenKey &&
+                previous.walletKey === walletKey &&
+                previous.settingsKey === settingsKey &&
+                previous.balanceKey === currentBalanceKey &&
+                previous.enabled === enabled
+            previousPnlInputs.current = {
+                tokenKey, walletKey, settingsKey, balanceKey: currentBalanceKey, enabled
+            }
+            const recent = lastCompletedScan.current
+            const allCachedAndComplete = trackedTokens.every(token =>
+                allWalletAddresses.every(wallet => {
+                    const holding = currentBalances?.[wallet]?.balances?.[token]
+                    if (Number(holding?.normalized ?? 0) <= 0) return true
+                    return warmWalletPositions?.[wallet]?.[token]?.complete === true
+                })
+            )
+            // A watchlist visibility change must never restart historical scans
+            // for positions that are already cached. This works even when the
+            // previous successful scan was more than 90 seconds ago or happened
+            // before this app session. A genuinely new token with no cached
+            // position still proceeds through the normal discovery pipeline.
+            const allCachedPositionsPresent = trackedTokens.every(token =>
+                allWalletAddresses.every(wallet => {
+                    const holding = currentBalances?.[wallet]?.balances?.[token]
+                    if (Number(holding?.normalized ?? 0) <= 0) return true
+                    return Boolean(warmWalletPositions?.[wallet]?.[token] || walletPositionsRef.current?.[wallet]?.[token])
+                })
+            )
+            if (enabled && watchlistOnlyChange && allCachedPositionsPresent) {
+                setLoading(false)
+                setErrors([])
+                setActiveTokens([])
+                setProgress({ stage: 'complete', current: 1, total: 1 })
+                return
+            }
+
+            // A pure show/hide watchlist edit is presentation-only: restore
+            // persisted positions without launching the historical P&L pipeline.
+            // Never bypass a scan when wallet holdings/settings/enabled changed.
+            const safeWatchlistToggle = watchlistOnlyChange &&
+                recent.walletKey === walletKey &&
+                recent.settingsKey === settingsKey &&
+                recent.balanceKey === currentBalanceKey &&
+                recent.at > 0
+            if (enabled && allCachedAndComplete && recent.walletKey === walletKey &&
+                recent.settingsKey === settingsKey &&
+                ((Date.now() - recent.at < 90000 && recent.balanceKey === currentBalanceKey) || safeWatchlistToggle)) {
+                setLoading(false)
+                setErrors([])
+                setActiveTokens([])
+                setProgress({ stage: 'complete', current: 1, total: 1 })
+                return
+            }
 
             // V144: cache-first coordination with HEX DCA. App.jsx deliberately
             // keeps live Token P&L explorer scans paused while HEX DCA is doing its
@@ -2543,6 +2645,7 @@ export default function useTokenPnl({
                         // When the on-chain balance is larger than the reconstructed ERC20
                         // ledger, recover that missing basis from actual WPLS deposit() txs.
                         if (targetToken === WPLS_ADDRESS) {
+                            pnlDiagnostic("wpls-wallet-start", { wallet, completedTokenCount, totalTokens: orderedTokens.length })
                             const combinedCurrentUnits = Number(currentBalances?.[wallet]?.balances?.[targetToken]?.normalized ?? 0)
                             let nativeCurrentUnits = 0
                             try {
@@ -2554,9 +2657,12 @@ export default function useTokenPnl({
                                 let wrapCache = readWplsWrapCache(wallet)
                                 if (!wrapCache?.complete) {
                                     try {
+                                        pnlDiagnostic("wpls-wrap-scan-start", { wallet, missingUnits, wrappedCurrentUnits })
                                         const txs = await fetchCompleteAddressTransactions(wallet, "mainnet", settings, {
-                                            maxPages: 250, delayBetweenPages: 80, retryAttempts: 4
+                                            maxPages: 250, delayBetweenPages: 80, retryAttempts: 4,
+                                            onProgress: info => pnlDiagnostic("wpls-wrap-scan-page", { wallet, page: info?.page, collected: info?.collected })
                                         })
+                                        pnlDiagnostic("wpls-wrap-scan-complete", { wallet, transactions: txs?.length ?? 0 })
                                         const deposits = (txs ?? []).filter(tx => {
                                             const to = normalizeAddress(tx?.to?.hash ?? tx?.to)
                                             const from = normalizeAddress(tx?.from?.hash ?? tx?.from)
@@ -2614,10 +2720,15 @@ export default function useTokenPnl({
                                     Math.abs(Number(nativeLedger.currentUnits ?? 0) - nativeCurrentUnits) <= Math.max(0.000001, nativeCurrentUnits * 0.001)
                                 if (!nativeCacheFresh) {
                                     try {
+                                        pnlDiagnostic("pls-native-scan-start", { wallet, nativeCurrentUnits })
                                         const [regularTxs, internalTxs] = await Promise.all([
-                                            fetchCompleteAddressTransactions(wallet, 'mainnet', settings, { maxPages: 250, delayBetweenPages: 60, retryAttempts: 4 }),
+                                            fetchCompleteAddressTransactions(wallet, 'mainnet', settings, {
+                                                maxPages: 250, delayBetweenPages: 60, retryAttempts: 4,
+                                                onProgress: info => pnlDiagnostic("pls-regular-scan-page", { wallet, page: info?.page, collected: info?.collected })
+                                            }),
                                             fetchCompleteAddressInternalTransactions(wallet, settings, { maxPages: 250 })
                                         ])
+                                        pnlDiagnostic("pls-native-scan-complete", { wallet, regularTransactions: regularTxs?.length ?? 0, internalTransactions: internalTxs?.length ?? 0 })
                                         const movements = []
                                         const addMovement = (tx, kind) => {
                                             const from = normalizeAddress(tx?.from?.hash ?? tx?.from)
@@ -2637,12 +2748,63 @@ export default function useTokenPnl({
                                         ;(internalTxs ?? []).forEach(tx => addMovement(tx, 'internal'))
                                         movements.sort((a,b) => a.timestamp-b.timestamp || a.blockNumber-b.blockNumber)
 
+                                        // V2.4.3 cleanup #8: native PLS can have 1,000+ regular
+                                        // transactions. Pricing each incoming movement one-by-one makes
+                                        // the browser repeatedly enter the full historical-price provider
+                                        // chain and can leave WPLS looking stuck at 39/40 for minutes.
+                                        // Prime every unique incoming day in one batched pass first. The
+                                        // accounting loop below is unchanged and still reads the same
+                                        // persisted historical prices / bootstrap fallback.
+                                        const incomingNativeMoves = movements.filter(move => move.direction === 'in')
+                                        const nativePriceTimestamps = [...new Set(incomingNativeMoves.map(move => Number(move.timestamp)).filter(ts => ts > 0))]
+                                        const nativeBlockByDay = {}
+                                        incomingNativeMoves.forEach(move => {
+                                            const ts = Number(move.timestamp)
+                                            const block = Number(move.blockNumber ?? 0)
+                                            if (!(ts > 0) || !(block > 0)) return
+                                            const day = Math.floor(ts / 86400)
+                                            if (!nativeBlockByDay[day]) nativeBlockByDay[day] = block
+                                        })
+
+                                        // Cleanup #10: #9 proved that the initial batch prefetch finishes,
+                                        // but an unpriced native-PLS day then re-entered the full provider
+                                        // chain once per movement. Each miss could burn the 12-second timeout
+                                        // and make WPLS appear stuck at 39/40. Prime the exact day plus every
+                                        // WPLS bootstrap day in one batch, then make native accounting cache-only.
+                                        // This preserves the same 0/1/3/7/14/30/60-day pricing policy while
+                                        // preventing hundreds of duplicate browser RPC/provider calls.
+                                        const nativeBootstrapOffsets = [0, 1, 3, 7, 14, 30, 60]
+                                        const nativePrefetchTimestamps = [...new Set(nativePriceTimestamps.flatMap(ts =>
+                                            nativeBootstrapOffsets.map(days => ts + days * 86400)
+                                        ))]
+                                        pnlDiagnostic("pls-native-price-prefetch-start", { wallet, movements: movements.length, incomingMovements: incomingNativeMoves.length, uniqueDays: nativePriceTimestamps.length, requestedBootstrapDays: nativePrefetchTimestamps.length })
+                                        if (nativePrefetchTimestamps.length > 0) {
+                                            await prefetchHistoricalTokenPrices(WPLS_ADDRESS, nativePrefetchTimestamps, 'mainnet', {
+                                                blockByDay: nativeBlockByDay, settings, decimals: 18
+                                            })
+                                        }
+                                        const cachedNativePrice = timestamp => {
+                                            for (const days of nativeBootstrapOffsets) {
+                                                const price = readCachedHistoricalPrice('mainnet', WPLS_ADDRESS, Number(timestamp) + days * 86400)
+                                                if (Number.isFinite(price) && price > 0) return { price, bootstrapDays: days }
+                                            }
+                                            return { price: null, bootstrapDays: null }
+                                        }
+                                        const cachedNativeDays = nativePriceTimestamps.reduce((count, ts) =>
+                                            count + (Number.isFinite(cachedNativePrice(ts)?.price) ? 1 : 0), 0)
+                                        pnlDiagnostic("pls-native-price-prefetch-complete", { wallet, uniqueDays: nativePriceTimestamps.length, cachedDays: cachedNativeDays, requestedBootstrapDays: nativePrefetchTimestamps.length })
+
                                         let nativeUnits = 0
                                         let nativeBasis = 0
                                         let pricedIncoming = 0
                                         let unpricedIncoming = 0
                                         let unpricedUnits = 0
+                                        let processedNativeMoves = 0
                                         for (const move of movements) {
+                                            processedNativeMoves += 1
+                                            if (processedNativeMoves % 100 === 0 || processedNativeMoves === movements.length) {
+                                                pnlDiagnostic("pls-native-accounting-progress", { wallet, processed: processedNativeMoves, total: movements.length })
+                                            }
                                             if (move.direction === 'out') {
                                                 const take = Math.min(move.units, Math.max(0, nativeUnits))
                                                 const avg = nativeUnits > 0 ? nativeBasis / nativeUnits : 0
@@ -2652,13 +2814,32 @@ export default function useTokenPnl({
                                             }
                                             let basis = null
                                             const matchingEvent = events.find(event => event.network === 'mainnet' && String(event.hash).toLowerCase() === move.hash)
+                                            if (processedNativeMoves <= 5) {
+                                                pnlDiagnostic("pls-native-accounting-move-start", { wallet, processed: processedNativeMoves, total: movements.length, direction: move.direction, hash: move.hash, hasMatchingEvent: Boolean(matchingEvent) })
+                                            }
                                             if (matchingEvent) {
-                                                const spend = await getEventSpendUsdForWallet(matchingEvent, wallet)
+                                                // Cleanup #9: a browser RPC/provider can remain pending even
+                                                // after the native-history and price-prefetch stages completed.
+                                                // Never let one transaction pin the whole WPLS worker at 39/40.
+                                                // On timeout we preserve the existing fallback below: transaction-
+                                                // day WPLS market value for the received native PLS.
+                                                let spend = null
+                                                try {
+                                                    spend = await promiseWithTimeout(getEventSpendUsdForWallet(matchingEvent, wallet), 12000)
+                                                } catch (error) {
+                                                    pnlDiagnostic("pls-native-event-spend-timeout", { wallet, processed: processedNativeMoves, hash: move.hash, error: error?.message ?? String(error) })
+                                                }
                                                 if (Number.isFinite(spend) && spend > 0) basis = spend
                                             }
                                             if (!(Number.isFinite(basis) && basis >= 0)) {
-                                                const priced = await getHistoricalPriceWithWplsBootstrap(WPLS_ADDRESS, move.timestamp, 'mainnet')
+                                                const priced = cachedNativePrice(move.timestamp)
                                                 if (Number.isFinite(priced?.price) && priced.price > 0) basis = move.units * priced.price
+                                                else if (processedNativeMoves <= 5 || processedNativeMoves % 100 === 0) {
+                                                    pnlDiagnostic("pls-native-price-cache-miss", { wallet, processed: processedNativeMoves, hash: move.hash })
+                                                }
+                                            }
+                                            if (processedNativeMoves <= 5) {
+                                                pnlDiagnostic("pls-native-accounting-move-complete", { wallet, processed: processedNativeMoves, total: movements.length, direction: move.direction, hash: move.hash, basisResolved: Number.isFinite(basis) && basis >= 0 })
                                             }
                                             nativeUnits += move.units
                                             if (Number.isFinite(basis) && basis >= 0) { nativeBasis += basis; pricedIncoming += 1 }
@@ -2760,6 +2941,10 @@ export default function useTokenPnl({
                             }
                         }
 
+                        if (targetToken === WPLS_ADDRESS) {
+                            pnlDiagnostic("wpls-wallet-complete", { wallet, units: position.units, costBasisUsd: position.costBasisUsd, pricedAcquisitionCount: position.pricedAcquisitionCount, unpricedAcquisitionCount: position.unpricedAcquisitionCount })
+                        }
+
                         const averageEntry = position.units > 0 && position.costBasisUsd > 0
                             ? position.costBasisUsd / position.units : null
                         const walletHasScanError = scanErrors.some(error => normalizeAddress(error?.wallet) === wallet)
@@ -2795,8 +2980,13 @@ export default function useTokenPnl({
                 const processToken = async (targetToken, tokenIndex) => {
                     if (cancelled) return
                     setActiveTokens(prev => prev.includes(targetToken) ? prev : [...prev, targetToken])
+                    pnlDiagnostic("token-worker-start", { token: targetToken, tokenIndex })
                     try {
                         await processTokenInner(targetToken, tokenIndex)
+                        pnlDiagnostic("token-worker-complete", { token: targetToken, tokenIndex })
+                    } catch (error) {
+                        pnlDiagnostic("token-worker-error", { token: targetToken, tokenIndex, message: error?.message ?? String(error) })
+                        throw error
                     } finally {
                         if (!cancelled) setActiveTokens(prev => prev.filter(token => token !== targetToken))
                     }
@@ -2822,7 +3012,13 @@ export default function useTokenPnl({
 
                 safeLocalStorageRemove(getAccountingCheckpointKey(walletKey, tokenKey))
                 safeLocalStorageRemove(getCheckpointKey(walletKey, tokenKey))
-                if (!cancelled) setErrors(scanErrors)
+                if (!cancelled) {
+                    setErrors(scanErrors)
+                    if (scanErrors.length === 0) lastCompletedScan.current = {
+                        walletKey, settingsKey: JSON.stringify(settings ?? {}),
+                        balanceKey: currentBalanceKey, at: Date.now()
+                    }
+                }
             } catch (error) {
                 console.error("Token P&L v36 FAILED", {
                     message: error?.message,

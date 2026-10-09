@@ -7,6 +7,8 @@ import { defaultSettings } from '../config/settings'
 import { appSettingsAtom } from '../store'
 import { useAtom } from 'jotai'
 
+const geckoInFlight = new Map()
+let geckoCooldownUntil = 0
 const CACHE_PREFIX = 'pls_candles_'
 const CACHE_TTL = 1000 * 60 * 30 // 30 minutes
 
@@ -18,7 +20,7 @@ const loadCached = (type, lp) => {
         if (!raw) return null
 
         const parsed = JSON.parse(raw)
-        if (!parsed?.data || !parsed?.timestamp) return null
+        if (!Array.isArray(parsed?.data) || parsed.data.length === 0 || !parsed?.timestamp) return null
 
         if (Date.now() - parsed.timestamp > CACHE_TTL) return null
 
@@ -29,6 +31,8 @@ const loadCached = (type, lp) => {
 }
 
 const saveCached = (type, lp, data) => {
+    // Empty API responses are not valid candle history and must not poison the cache.
+    if (!Array.isArray(data) || data.length === 0) return
     try {
         localStorage.setItem(
             getCacheKey(type, lp),
@@ -228,12 +232,10 @@ export default function useHistory({ priceData }) {
     // it is causing the renderer to stall/crash on startup
 
     if (!chartKeyPoints?.[bestStableAddress]?.length) {
-        console.log('hydrating stable short history')
         getHistory(bestStableAddress, true, settings)
     }
 
     if (!dailyCandles?.[bestStableAddress]?.length) {
-        console.log('hydrating stable daily candles')
         fetchDailyCandles(bestStableAddress)
     }
 }
@@ -417,6 +419,45 @@ export default function useHistory({ priceData }) {
         }
         
     }, [prices])
+    const fetchGeckoCandlesJson = async (url) => {
+        if (window?.electron?.fetchJson) {
+            const result = await window.electron.fetchJson(url)
+            if (!result?.ok) {
+                const status = Number(result?.status || 0)
+                throw new Error(`GeckoTerminal ${status ? `HTTP ${status}` : 'network error'}: ${result?.error || 'Upstream request failed'}`)
+            }
+            return result.data
+        }
+        if (window?.electron?.getFile) {
+            const raw = await window.electron.getFile(url)
+            return typeof raw === 'string' ? JSON.parse(raw) : raw
+        }
+
+        // Vite uses its own same-origin reverse proxy; never call GeckoTerminal
+        // directly from the browser (CORS) or port 5174 (CSP / absent server).
+        const localDev = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+        const endpoint = localDev
+            ? `/__pcdw/gecko${new URL(url).pathname}${new URL(url).search}`
+            : `/wp-json/pcdw/v1/gecko-candles?url=${encodeURIComponent(url)}`
+        const now = Date.now()
+        if (now < geckoCooldownUntil) {
+            throw new Error(`GeckoTerminal rate limited; retry in ${Math.ceil((geckoCooldownUntil - now) / 1000)}s`)
+        }
+        if (geckoInFlight.has(endpoint)) return geckoInFlight.get(endpoint)
+        const request = (async () => {
+            const response = await fetch(endpoint, { headers: { Accept: 'application/json' } })
+            if (response.status === 429) {
+                const retry = Number(response.headers.get('Retry-After'))
+                geckoCooldownUntil = Date.now() + (Number.isFinite(retry) && retry > 0 ? Math.min(retry, 300) : 60) * 1000
+                throw new Error(`GeckoTerminal HTTP 429; waiting before retry`)
+            }
+            if (!response.ok) throw new Error(`GeckoTerminal proxy HTTP ${response.status}`)
+            return response.json()
+        })()
+        geckoInFlight.set(endpoint, request)
+        try { return await request } finally { geckoInFlight.delete(endpoint) }
+    }
+
     const fetchDailyCandles = async (lpAddress) => {
         const cached = loadCached('daily', lpAddress)
         if (cached) {
@@ -424,7 +465,7 @@ export default function useHistory({ priceData }) {
                 ...prev,
                 [lpAddress]: cached
             }))
-            return // 🚀 skip fetch if cache is fresh
+            return cached // 🚀 skip fetch if cache is fresh
         }
 
         try {
@@ -436,17 +477,13 @@ export default function useHistory({ priceData }) {
             const tokenParam = isWplsDaiPair ? 'quote' : 'base'
             const url = `https://api.geckoterminal.com/api/v2/networks/pulsechain/pools/${lpAddress}/ohlcv/day?aggregate=1&limit=100&currency=usd&token=${tokenParam}&include_empty_intervals=true`
 
-            const raw =
-                window?.electron?.getFile
-                    ? await window.electron.getFile(url)
-                    : await fetch(url).then(res => res.json())
-
-            const json =
-                typeof raw === 'string'
-                    ? JSON.parse(raw)
-                    : raw
-
-            const candles = json?.data?.attributes?.ohlcv_list ?? []
+            const json = await fetchGeckoCandlesJson(url)
+            // Electron's getFile IPC returns null on upstream failures. Do not
+            // silently cache that as an empty history (which hides the failure).
+            if (!Array.isArray(json?.data?.attributes?.ohlcv_list)) {
+                throw new Error('GeckoTerminal did not return candle data. Check the Electron console for the upstream HTTP status.')
+            }
+            const candles = json.data.attributes.ohlcv_list
 
             const parsed = candles
                 .map(c => ({
@@ -465,8 +502,10 @@ export default function useHistory({ priceData }) {
             }))
 
             saveCached('daily', lpAddress, parsed)
+            return parsed
         } catch (err) {
             console.error('Failed to fetch Gecko candles:', lpAddress, err)
+            return { error: err?.message || 'Unable to load price history' }
         }
     }
         const fetchHourlyCandles = async (lpAddress) => {
@@ -488,15 +527,7 @@ export default function useHistory({ priceData }) {
                 const tokenParam = isWplsDaiPair ? 'quote' : 'base'
                 const url = `https://api.geckoterminal.com/api/v2/networks/pulsechain/pools/${lpAddress}/ohlcv/hour?aggregate=1&limit=72&currency=usd&token=${tokenParam}&include_empty_intervals=true`
 
-                const raw =
-                    window?.electron?.getFile
-                        ? await window.electron.getFile(url)
-                        : await fetch(url).then(res => res.json())
-
-                const json =
-                    typeof raw === 'string'
-                        ? JSON.parse(raw)
-                        : raw
+                const json = await fetchGeckoCandlesJson(url)
 
                 const candles = json?.data?.attributes?.ohlcv_list ?? []
 
@@ -711,7 +742,6 @@ export default function useHistory({ priceData }) {
 
             // Don't proceed if we've reached the chain start
             if (startBlock === PULSECHAIN_FIRST_BLOCK && oldestBlock <= PULSECHAIN_FIRST_BLOCK) {
-                console.log('Reached the beginning of PulseChain history')
                 return
             }
 

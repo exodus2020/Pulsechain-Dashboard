@@ -1,0 +1,39 @@
+diff --git a/node_modules/web3/lib/index.js b/node_modules/web3/lib/index.js
+index 753ebaf..cfa23e4 100644
+--- a/node_modules/web3/lib/index.js
++++ b/node_modules/web3/lib/index.js
+@@ -31,7 +31,7 @@ var Eth = require('web3-eth');
+ var Net = require('web3-net');
+ var Personal = require('web3-eth-personal');
+ var Shh = require('web3-shh');
+-var Bzz = require('web3-bzz');
++var Bzz = null;
+ var utils = require('web3-utils');
+ var Web3 = function Web3() {
+     var _this = this;
+@@ -41,7 +41,7 @@ var Web3 = function Web3() {
+     this.utils = utils;
+     this.eth = new Eth(this);
+     this.shh = new Shh(this);
+-    this.bzz = new Bzz(this);
++    this.bzz = null;
+     // overwrite package setProvider
+     var setProvider = this.setProvider;
+     this.setProvider = function (provider, net) {
+@@ -49,7 +49,6 @@ var Web3 = function Web3() {
+         setProvider.apply(_this, arguments);
+         _this.eth.setRequestManager(_this._requestManager);
+         _this.shh.setRequestManager(_this._requestManager);
+-        _this.bzz.setProvider(provider);
+         return true;
+     };
+ };
+@@ -60,7 +59,7 @@ Web3.modules = {
+     Net: Net,
+     Personal: Personal,
+     Shh: Shh,
+-    Bzz: Bzz
++    Bzz: null
+ };
+ core.addProviders(Web3);
+ module.exports = Web3;

@@ -45,7 +45,7 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
             <div className="price-button" style={{ position: 'relative' }}>
                 <div style={{ width: 35 }}/>
                 <div style={{ position: 'absolute', left: -5 }}>
-                    <ImageContainer source={image} size={35}/>
+                    <ImageContainer source={image} address={tokenToUse?.id} size={35}/>
                 </div>
                 <div>
                     <div style={{ fontSize: 18 }}>{tokenToUse?.name}</div>
@@ -295,7 +295,7 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
             }}
         >
             <div className="price-button">
-                <ImageContainer source={image} size={35} />
+                <ImageContainer source={image} address={tokenAddress} size={35} />
                 <div style={{
                         textAlign: 'right',
                         width: 125,
@@ -328,7 +328,7 @@ function SingleTokenButton ({ balances, prices, getImage, pairId, priceArray, wa
                 <div className="price-button" >
                     <div style={{ width: 35 }}/>
                     <div style={{ position: 'absolute', left: 15 }}>
-                        <ImageContainer source={image} size={35}/>
+                        <ImageContainer source={image} address={tokenAddress} size={35}/>
                     </div>
                     <div>
                         <div style={{ fontSize: 18, width: 260 }} className="price-name">{priceInfo.name}</div>

@@ -946,8 +946,8 @@ function PriceRow({ tokenInfo, resetHistory, isLoading, statsData, invert = fals
         : isPls
             ? (
                 usdSelected
-                    ? (rawThirtyDayPrice || rawSevenDayPrice || historyThirtyDayPrice || historySevenDayPrice || 0)
-                    : (historyThirtyDayPrice || historySevenDayPrice || 1)
+                    ? (rawThirtyDayPrice || historyThirtyDayPrice || 0)
+                    : (historyThirtyDayPrice || 0)
             )
             : (usdSelected
                 ? (rawThirtyDayPrice || fallbackThirtyDayPriceUsd || historyThirtyDayPrice || 0)

@@ -35,6 +35,7 @@ function createWindow() {
           preload: path.join(__dirname, 'preload.js'),
           nodeIntegration: false,
           contextIsolation: true,
+          sandbox: true,
           webSecurity: true
         }
        })
@@ -65,7 +66,50 @@ function createWindow() {
     }
 }
 
-app.whenReady().then(createWindow)
+// Localhost-only GeckoTerminal proxy for the Vite browser build.
+// Production Web will use the WordPress proxy instead; Electron itself keeps
+// using the existing getFile IPC bridge.
+let chartProxyServer = null
+const startChartDevProxy = () => {
+  if (!isDev || chartProxyServer) return
+
+  const proxyApp = express()
+  proxyApp.get('/gecko', async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173')
+    res.setHeader('Cache-Control', 'public, max-age=60')
+
+    try {
+      const target = String(req.query.url ?? '')
+      const parsed = new URL(target)
+      if (parsed.protocol !== 'https:' || parsed.hostname !== 'api.geckoterminal.com') {
+        res.status(400).json({ error: 'Invalid GeckoTerminal URL' })
+        return
+      }
+
+      const upstream = await fetch(target, {
+        headers: { Accept: 'application/json;version=20230203' }
+      })
+      const body = await upstream.text()
+      res.status(upstream.status)
+      res.type('application/json').send(body)
+    } catch (error) {
+      res.status(502).json({ error: error?.message ?? 'GeckoTerminal proxy failed' })
+    }
+  })
+
+  chartProxyServer = proxyApp.listen(5174, '127.0.0.1', () => {
+    console.log('Chart dev proxy listening on http://localhost:5174')
+  })
+  chartProxyServer.on('error', error => {
+    console.warn('Chart dev proxy unavailable:', error?.message ?? error)
+    chartProxyServer = null
+  })
+}
+
+app.whenReady().then(() => {
+  startChartDevProxy()
+  createWindow()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -151,6 +195,10 @@ ipcMain.handle('serve-webapp', async (event, folder, port, buildPath) => {
 
 // Clean up all servers on app quit
 app.on('before-quit', () => {
+  if (chartProxyServer) {
+    chartProxyServer.close()
+    chartProxyServer = null
+  }
   for (const server of servers.values()) {
     server.close()
   }

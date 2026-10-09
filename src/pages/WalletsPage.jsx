@@ -147,6 +147,20 @@ function WalletsPage ({
     const [hexMinerDetailsOpen, setHexMinerDetailsOpen] = useState(false)
     const [ selectedTimeframe ] = useAtom(timeframeAtom)
     const [ pulseMetrics, setPulseMetrics ] = useState([])
+    const PRVX_ADDRESS = '0xf6f8db0aba00007681f8faf16a0fda1c9b030b11'
+    const metricAddress = coin => String(
+        coin?.address ?? coin?.tokenAddress ?? coin?.contractAddress ?? coin?.token?.address ?? ''
+    ).toLowerCase()
+    const metricScore = coin => Number(coin?.liquidityUsd ?? coin?.liquidity ?? coin?.marketCap ?? coin?.marketcap ?? coin?.volume24h ?? 0) || 0
+    const shouldUseMetricRow = (acc, normalizedSymbol, coin) => {
+        if (!acc[normalizedSymbol]) return true
+        if (normalizedSymbol !== 'PRVX') return false
+        const incomingAddress = metricAddress(coin)
+        const currentAddress = String(acc.__prvxAddress ?? '').toLowerCase()
+        if (incomingAddress === PRVX_ADDRESS && currentAddress !== PRVX_ADDRESS) return true
+        if (currentAddress === PRVX_ADDRESS) return false
+        return metricScore(coin) > Number(acc.__prvxScore ?? 0)
+    }
     const [ cachedPulseOverrides, setCachedPulseOverrides ] = useState(() => {
         try {
             const cachedOverrides = localStorage.getItem('pulsePercentOverrides')
@@ -176,17 +190,24 @@ function WalletsPage ({
             }
 
             const normalizedSymbol = symbol === 'WPLS' ? 'PLS' : symbol
+            if (!shouldUseMetricRow(acc, normalizedSymbol, coin)) return acc
 
             acc[normalizedSymbol] = {
-                '1H': Number(coin?.percent1h),
-                '6H': Number(coin?.percent6h),
-                '24H': Number(coin?.percent24h),
-                '7D': Number(coin?.percent7d),
-                '30D': Number(coin?.percent30d)
+                '1H': Number(coin?.percent1h) * 100,
+                '6H': Number(coin?.percent6h) * 100,
+                '24H': Number(coin?.percent24h) * 100,
+                '7D': Number(coin?.percent7d) * 100,
+                '30D': Number(coin?.percent30d) * 100
+            }
+            if (normalizedSymbol === 'PRVX') {
+                acc.__prvxAddress = metricAddress(coin)
+                acc.__prvxScore = metricScore(coin)
             }
 
             return acc
         }, {})
+            delete rebuilt.__prvxAddress
+            delete rebuilt.__prvxScore
 
             if (rebuilt?.PLS) {
                 try {
@@ -504,8 +525,7 @@ function WalletsPage ({
                 '0xa1077a294dde1b09bb078844df40758a5d0f9a27': 'PLS',
                 '0x95b303987a60c71504d99aa1b13b4da07b0790ab': 'PLSX',
                 '0x2fa878ab3f87cc1c9737fc071108f904c0b0c95d': 'INC',
-                '0x2b591e99afe9f32eaa6214f7b7629768c40eeb39': 'HEX',
-                '0xf6f8db0aba00007681f8faf16a0fda1c9b030b11': 'PRVX'
+                '0x2b591e99afe9f32eaa6214f7b7629768c40eeb39': 'HEX'
             }
 
             const symbol = symbolByAddress[key]
@@ -674,12 +694,46 @@ function WalletsPage ({
     useEffect(() => {
         const fetchPulseMetrics = async () => {
             try {
-                const raw = await window.electron.getFile("https://pulsecoinlist.com/stats")
+                const statsUrl = "https://pulsecoinlist.com/stats"
+                let raw
 
-                const payload =
-                    typeof raw === 'string'
-                        ? JSON.parse(raw)
-                        : raw
+                if (window?.electron?.getFile) {
+                    // Electron can request PulseCoinList server-side without browser CORS.
+                    raw = await window.electron.getFile(statsUrl)
+                } else {
+                    // Browser builds must use a same-origin proxy.
+                    // - Vite dev proxies this path to pulsecoinlist.com (vite.config.js).
+                    // - WordPress exposes the same data through its REST endpoint in production.
+                    const browserStatsUrl = import.meta.env.DEV
+                        ? '/__pcdw/pulsecoinlist/stats'
+                        : '/wp-json/pcdw/v1/pulsecoinlist-stats'
+                    const response = await fetch(browserStatsUrl, { cache: 'no-store' })
+                    if (!response.ok) {
+                        throw new Error(`PulseCoinList proxy HTTP ${response.status}`)
+                    }
+                    raw = await response.text()
+                }
+
+                let payload
+                if (typeof raw === 'string') {
+                    try {
+                        payload = JSON.parse(raw)
+                        if (typeof payload === 'string' && payload.includes('__NEXT_DATA__')) {
+                            const match = payload.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i)
+                            if (match?.[1]) payload = JSON.parse(match[1])
+                        }
+                    } catch {
+                        // Next.js embeds the stats payload in the page HTML when the
+                        // endpoint returns a document rather than JSON.
+                        const nextDataMatch = raw.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i)
+                        if (!nextDataMatch?.[1]) {
+                            throw new Error('PulseCoinList stats response was not JSON')
+                        }
+                        payload = JSON.parse(nextDataMatch[1])
+                    }
+                } else {
+                    payload = raw
+                }
 
                 const rows =
                     Array.isArray(payload?.props?.pageProps?.topCoinsMetrics) ? payload.props.pageProps.topCoinsMetrics :
@@ -700,6 +754,7 @@ function WalletsPage ({
                     }
 
                     const normalizedSymbol = symbol === 'WPLS' ? 'PLS' : symbol
+                    if (!shouldUseMetricRow(acc, normalizedSymbol, coin)) return acc
 
                     acc[normalizedSymbol] = {
                         '1H': Number(coin?.percent1h) * 100,
@@ -708,9 +763,15 @@ function WalletsPage ({
                         '7D': Number(coin?.percent7d) * 100,
                         '30D': Number(coin?.percent30d) * 100
                     }
+                    if (normalizedSymbol === 'PRVX') {
+                        acc.__prvxAddress = metricAddress(coin)
+                        acc.__prvxScore = metricScore(coin)
+                    }
 
                     return acc
                 }, {})
+                    delete mapped.__prvxAddress
+                    delete mapped.__prvxScore
 
                     setCachedPulseOverrides(mapped)
 
@@ -932,7 +993,7 @@ const CORE_WATCHLIST_TOKENS = new Set([
                                     letterSpacing: 0.35
                                 }}>
                                     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{statusText}</span>
-                                    <span className="mute" style={{ whiteSpace: 'nowrap' }}>
+                                    <span className="mute" style={{ whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8 }}>
                                         {isTransferStage
                                             ? `${total > 0 ? `${current}/${total}` : 'Working…'}`
                                             : total > 0 ? `${current}/${total}` : 'Working…'}

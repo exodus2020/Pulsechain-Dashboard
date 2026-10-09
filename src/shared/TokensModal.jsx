@@ -351,7 +351,6 @@ function TokensModal({ wplsPrice }) {
     try {
       await scanForTokens()
     } catch (err) {
-      console.log('Unable to scan for tokens')
     }
   }
 
